@@ -1,0 +1,35 @@
+# Build & Bytecode Artifacts
+*.safe
+*.elf
+*.o
+*.bin
+!examples/editor/font_terminus.bin
+sagr_bin
+test_*_bin
+
+# Rendered Output Images
+*.ppm
+*.png
+!examples/editor/preview.png
+*.bmp
+
+# Release Bootstrap Toolchain Binaries
+!bin/
+!bin/sinc.elf
+!bin/staff
+!bin/packager_bin
+!bin/packager_o
+!bin/slim.elf
+
+# Scratch, Cache & Build Directories
+scratch/
+build/
+dist/
+.cache/
+docs/
+
+# OS & Editor Artifacts
+.DS_Store
+*~
+*.swp
+*.swo

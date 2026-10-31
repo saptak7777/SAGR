@@ -1,0 +1,166 @@
+// ==========================================
+// sagr/pure/bitops.sinc
+// Pure Bitwise & Fixed-Point Geometry Helpers
+// ==========================================
+
+fn ctz64(val) [
+    if (val == 0) [
+        ret 64;
+    ]
+    cnt = 0;
+    lo32 = val & 4294967295;
+    if (lo32 == 0) [
+        val = val >> 32;
+        cnt = cnt + 32;
+    ]
+    lo16 = val & 65535;
+    if (lo16 == 0) [
+        val = val >> 16;
+        cnt = cnt + 16;
+    ]
+    lo8 = val & 255;
+    if (lo8 == 0) [
+        val = val >> 8;
+        cnt = cnt + 8;
+    ]
+    lo4 = val & 15;
+    if (lo4 == 0) [
+        val = val >> 4;
+        cnt = cnt + 4;
+    ]
+    lo2 = val & 3;
+    if (lo2 == 0) [
+        val = val >> 2;
+        cnt = cnt + 2;
+    ]
+    lo1 = val & 1;
+    if (lo1 == 0) [
+        cnt = cnt + 1;
+    ]
+    ret cnt;
+]
+
+fn lzcnt64(val) [
+    if (val == 0) [
+        ret 64;
+    ]
+    cnt = 0;
+    hi32 = val >> 32;
+    if (hi32 != 0) [
+        val = hi32;
+    ]
+    if (hi32 == 0) [
+        cnt = cnt + 32;
+    ]
+
+    hi16 = val >> 16;
+    if (hi16 != 0) [
+        val = hi16;
+    ]
+    if (hi16 == 0) [
+        cnt = cnt + 16;
+    ]
+
+    hi8 = val >> 8;
+    if (hi8 != 0) [
+        val = hi8;
+    ]
+    if (hi8 == 0) [
+        cnt = cnt + 8;
+    ]
+
+    hi4 = val >> 4;
+    if (hi4 != 0) [
+        val = hi4;
+    ]
+    if (hi4 == 0) [
+        cnt = cnt + 4;
+    ]
+
+    hi2 = val >> 2;
+    if (hi2 != 0) [
+        val = hi2;
+    ]
+    if (hi2 == 0) [
+        cnt = cnt + 2;
+    ]
+
+    hi1 = val >> 1;
+    if (hi1 == 0) [
+        cnt = cnt + 1;
+    ]
+    ret cnt;
+]
+
+fn blsr64(val) [
+    pred = val - 1;
+    res = val & pred;
+    ret res;
+]
+
+fn q24_to_tile(coord) [
+    t = coord >> 12;
+    ret t;
+]
+
+fn q24_to_local(coord) [
+    loc = coord & 4095;
+    ret loc;
+]
+
+fn q24_to_pixel(coord) [
+    shifted = coord >> 8;
+    px = shifted & 15;
+    ret px;
+]
+
+fn q24_to_subpixel(coord) [
+    sub = coord & 255;
+    ret sub;
+]
+
+fn bo_abs(v) [
+    if (v < 0) [
+        ret 0 - v;
+    ]
+    ret v;
+]
+
+fn bo_octagonal_norm(dx, dy) [
+    ax = bo_abs(dx);
+    ay = bo_abs(dy);
+    max_d = ax;
+    min_d = ay;
+    if (ay > ax) [
+        max_d = ay;
+        min_d = ax;
+    ]
+    half_min = min_d >> 1;
+    res = max_d + half_min;
+    ret res;
+]
+
+fn bo_stamp_tile!(mask_ptr, tx, ty) [
+    if ((tx > -1) & (tx < SLSP_TILES_X) & (ty > -1) & (ty < SLSP_TILES_Y)) [
+        tile_idx = (ty * SLSP_TILES_X) + tx;
+        word_idx = tile_idx >> 6;
+        bit_idx = tile_idx & 63;
+        sh = 1 << bit_idx;
+        cur_w = mask_ptr@[word_idx];
+        mask_ptr@[word_idx] = cur_w | sh;
+    ]
+    ret 0;
+]
+
+fn bo_test_tile(mask_ptr, tx, ty) [
+    if ((tx > -1) & (tx < SLSP_TILES_X) & (ty > -1) & (ty < SLSP_TILES_Y)) [
+        tile_idx = (ty * SLSP_TILES_X) + tx;
+        word_idx = tile_idx >> 6;
+        bit_idx = tile_idx & 63;
+        cur_w = mask_ptr@[word_idx];
+        sh_w = cur_w >> bit_idx;
+        bit_val = sh_w & 1;
+        ret bit_val;
+    ]
+    ret 0;
+]

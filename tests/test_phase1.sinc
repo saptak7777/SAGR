@@ -1,0 +1,518 @@
+// ==========================================
+// tests/test_phase1.sinc
+// SAGR Phase 1 Comprehensive Test Suite
+// ==========================================
+
+fn test_bitops_ctz() [
+    if (ctz64(0) != 64) [
+        ret 1;
+    ]
+    if (ctz64(1) != 0) [
+        ret 2;
+    ]
+    if (ctz64(2) != 1) [
+        ret 3;
+    ]
+    if (ctz64(4) != 2) [
+        ret 4;
+    ]
+    if (ctz64(16) != 4) [
+        ret 5;
+    ]
+    if (ctz64(256) != 8) [
+        ret 6;
+    ]
+    if (ctz64(65536) != 16) [
+        ret 7;
+    ]
+    val31 = 1 << 31;
+    if (ctz64(val31) != 31) [
+        ret 8;
+    ]
+    val32 = 1 << 32;
+    if (ctz64(val32) != 32) [
+        ret 9;
+    ]
+    val48 = 1 << 48;
+    if (ctz64(val48) != 48) [
+        ret 10;
+    ]
+    val62 = 1 << 62;
+    if (ctz64(val62) != 62) [
+        ret 11;
+    ]
+    ret 0;
+]
+
+fn test_bitops_blsr() [
+    if (blsr64(0) != 0) [
+        ret 1;
+    ]
+    if (blsr64(1) != 0) [
+        ret 2;
+    ]
+    if (blsr64(3) != 2) [
+        ret 3;
+    ]
+    if (blsr64(6) != 4) [
+        ret 4;
+    ]
+    if (blsr64(128) != 0) [
+        ret 5;
+    ]
+    v_multi = (1 << 40) | (1 << 20);
+    if (blsr64(v_multi) != (1 << 40)) [
+        ret 6;
+    ]
+    ret 0;
+]
+
+fn test_coord_helpers() [
+    if (q24_to_tile(0) != 0) [
+        ret 1;
+    ]
+    if (q24_to_tile(4095) != 0) [
+        ret 2;
+    ]
+    if (q24_to_tile(4096) != 1) [
+        ret 3;
+    ]
+    if (q24_to_tile(8192) != 2) [
+        ret 4;
+    ]
+    if (q24_to_local(4097) != 1) [
+        ret 5;
+    ]
+    if (q24_to_local(4095) != 4095) [
+        ret 6;
+    ]
+    if (q24_to_pixel(256) != 1) [
+        ret 7;
+    ]
+    if (q24_to_pixel(3840) != 15) [
+        ret 8;
+    ]
+    if (q24_to_subpixel(255) != 255) [
+        ret 9;
+    ]
+    if (q24_to_subpixel(256) != 0) [
+        ret 10;
+    ]
+    ret 0;
+]
+
+fn test_surface_desc!(arena) [
+    surface = slsp_create!(arena, 1920, 1080, 0);
+    if (surface == 0) [
+        ret 1;
+    ]
+    w0 = surface.SLSP_WORD_DIMS;
+    w_width = w0 & 4294967295;
+    w_height = w0 >> 32;
+    if (w_width != 1920) [
+        ret 2;
+    ]
+    if (w_height != 1080) [
+        ret 3;
+    ]
+    w1 = surface.SLSP_WORD_STRIDE_FMT;
+    w_stride = w1 & 4294967295;
+    w_format = w1 >> 32;
+    if (w_stride != 7680) [
+        ret 4;
+    ]
+    if (w_format != 0) [
+        ret 5;
+    ]
+    fb_ptr = surface.SLSP_WORD_FB_PTR;
+    if (fb_ptr == 0) [
+        ret 6;
+    ]
+    mask_ptr = surface.SLSP_WORD_MASK_PTR;
+    if (mask_ptr == 0) [
+        ret 7;
+    ]
+    ret 0;
+]
+
+fn test_single_stamp!(mask_ptr) [
+    slsp_clear_dirty!(mask_ptr);
+    slsp_stamp_tile!(mask_ptr, 0, 0);
+    if (mask_ptr@[0] != 1) [
+        ret 1;
+    ]
+    slsp_stamp_tile!(mask_ptr, 63, 0);
+    w0_hi = (mask_ptr@[0] >> 63) & 1;
+    if (w0_hi != 1) [
+        ret 2;
+    ]
+    slsp_stamp_tile!(mask_ptr, 64, 0);
+    if (mask_ptr@[1] != 1) [
+        ret 3;
+    ]
+    slsp_stamp_tile!(mask_ptr, 119, 67);
+    w127_val = (mask_ptr@[127] >> 31) & 1;
+    if (w127_val != 1) [
+        ret 4;
+    ]
+    ret 0;
+]
+
+fn test_oob_stamp!(mask_ptr) [
+    slsp_clear_dirty!(mask_ptr);
+    slsp_stamp_tile!(mask_ptr, -1, 0);
+    slsp_stamp_tile!(mask_ptr, 120, 0);
+    slsp_stamp_tile!(mask_ptr, 0, -1);
+    slsp_stamp_tile!(mask_ptr, 0, 68);
+    slsp_stamp_tile!(mask_ptr, 999, 999);
+    non_zero_count = 0;
+    loop (chk:128 = 0 .. 128) [
+        if (mask_ptr@[chk] != 0) [
+            non_zero_count = non_zero_count + 1;
+        ]
+    ]
+    if (non_zero_count != 0) [
+        ret 1;
+    ]
+    ret 0;
+]
+
+fn test_box_stamp!(mask_ptr) [
+    slsp_clear_dirty!(mask_ptr);
+    bx0 = 100 << 8;
+    by0 = 100 << 8;
+    bx1 = 105 << 8;
+    by1 = 105 << 8;
+    slsp_stamp_box!(mask_ptr, bx0, by0, bx1, by1);
+    single_tile_hits = 0;
+    loop (k1:128 = 0 .. 128) [
+        w = mask_ptr@[k1];
+        if (w != 0) [
+            loop (b1:64 = 0 .. 64) [
+                if (w != 0) [
+                    single_tile_hits = single_tile_hits + 1;
+                    w = blsr64(w);
+                ]
+            ]
+        ]
+    ]
+    if (single_tile_hits != 1) [
+        ret 1;
+    ]
+
+    slsp_clear_dirty!(mask_ptr);
+    mx0 = 0;
+    my0 = 0;
+    mx1 = 31 << 8;
+    my1 = 31 << 8;
+    slsp_stamp_box!(mask_ptr, mx0, my0, mx1, my1);
+    multi_hits = 0;
+    loop (k2:128 = 0 .. 128) [
+        mw = mask_ptr@[k2];
+        if (mw != 0) [
+            loop (b2:64 = 0 .. 64) [
+                if (mw != 0) [
+                    multi_hits = multi_hits + 1;
+                    mw = blsr64(mw);
+                ]
+            ]
+        ]
+    ]
+    if (multi_hits != 4) [
+        ret 2;
+    ]
+
+    slsp_clear_dirty!(mask_ptr);
+    cx0 = -50 << 8;
+    cy0 = -50 << 8;
+    cx1 = 15 << 8;
+    cy1 = 15 << 8;
+    slsp_stamp_box!(mask_ptr, cx0, cy0, cx1, cy1);
+    clamped_hits = 0;
+    loop (k3:128 = 0 .. 128) [
+        cw = mask_ptr@[k3];
+        if (cw != 0) [
+            loop (b3:64 = 0 .. 64) [
+                if (cw != 0) [
+                    clamped_hits = clamped_hits + 1;
+                    cw = blsr64(cw);
+                ]
+            ]
+        ]
+    ]
+    if (clamped_hits != 1) [
+        ret 3;
+    ]
+    ret 0;
+]
+
+fn test_heddle_scanner!(mask_ptr) [
+    slsp_clear_dirty!(mask_ptr);
+    slsp_stamp_tile!(mask_ptr, 10, 5);
+    slsp_stamp_tile!(mask_ptr, 55, 20);
+    slsp_stamp_tile!(mask_ptr, 115, 65);
+    scanned_count = 0;
+    t1_ok = 0;
+    t2_ok = 0;
+    t3_ok = 0;
+    loop (w_idx:128 = 0 .. 128) [
+        w_val = mask_ptr@[w_idx];
+        if (w_val != 0) [
+            loop (bit_step:64 = 0 .. 64) [
+                if (w_val != 0) [
+                    b_idx = ctz64(w_val);
+                    tile_idx = (w_idx << 6) + b_idx;
+                    ty = tile_idx / 120;
+                    tx = tile_idx - (ty * 120);
+                    if ((tx == 10) & (ty == 5)) [
+                        t1_ok = 1;
+                    ]
+                    if ((tx == 55) & (ty == 20)) [
+                        t2_ok = 1;
+                    ]
+                    if ((tx == 115) & (ty == 65)) [
+                        t3_ok = 1;
+                    ]
+                    scanned_count = scanned_count + 1;
+                    w_val = blsr64(w_val);
+                ]
+            ]
+        ]
+    ]
+    if (scanned_count != 3) [
+        ret 1;
+    ]
+    if (t1_ok != 1) [
+        ret 2;
+    ]
+    if (t2_ok != 1) [
+        ret 3;
+    ]
+    if (t3_ok != 1) [
+        ret 4;
+    ]
+    ret 0;
+]
+
+fn test_beam_flush!(fb_ptr, tile_buf) [
+    target_tx = 2;
+    target_ty = 3;
+    loop (r:16 = 0 .. 16) [
+        r_base = r * 8;
+        loop (c:8 = 0 .. 8) [
+            idx = r_base + c;
+            pattern = (r << 32) | (c + 1);
+            tile_buf@[idx] = pattern;
+        ]
+    ]
+    slsp_beam_flush_tile!(fb_ptr, target_tx, target_ty, 7680, tile_buf~);
+    dest_base = fb_ptr + (target_ty * 16 * 7680) + (target_tx * 64);
+    mismatch = 0;
+    loop (chk_r:16 = 0 .. 16) [
+        row_addr = dest_base + (chk_r * 7680);
+        loop (chk_c:8 = 0 .. 8) [
+            actual = row_addr@[chk_c];
+            expected = (chk_r << 32) | (chk_c + 1);
+            if (actual != expected) [
+                mismatch = mismatch + 1;
+            ]
+        ]
+    ]
+    if (mismatch != 0) [
+        ret 1;
+    ]
+    ret 0;
+]
+
+fn test_beam_flush_isolation!(fb_ptr, tile_buf) [
+    iso_tx = 5;
+    iso_ty = 5;
+    iso_stride = 7680;
+    dest_base = fb_ptr + (iso_ty * 16 * iso_stride) + (iso_tx * 64);
+    row_above = dest_base - iso_stride;
+    row_above@[0] = 0;
+    row_below = dest_base + (16 * iso_stride);
+    row_below@[0] = 0;
+    dest_left = dest_base - 8;
+    dest_left@[0] = 0;
+    dest_right = dest_base + 64;
+    dest_right@[0] = 0;
+
+    loop (i:128 = 0 .. 128) [
+        tile_buf@[i] = 123456789;
+    ]
+    slsp_beam_flush_tile!(fb_ptr, iso_tx, iso_ty, iso_stride, tile_buf~);
+
+    if (row_above@[0] != 0) [
+        ret 1;
+    ]
+    if (row_below@[0] != 0) [
+        ret 2;
+    ]
+    if (dest_left@[0] != 0) [
+        ret 3;
+    ]
+    if (dest_right@[0] != 0) [
+        ret 4;
+    ]
+    ret 0;
+]
+
+fn test_idle_audit!(mask_ptr) [
+    slsp_stamp_tile!(mask_ptr, 1, 1);
+    slsp_stamp_tile!(mask_ptr, 2, 2);
+    slsp_clear_dirty!(mask_ptr);
+    dirty_count = 0;
+    loop (chk:128 = 0 .. 128) [
+        if (mask_ptr@[chk] != 0) [
+            dirty_count = dirty_count + 1;
+        ]
+    ]
+    if (dirty_count != 0) [
+        ret 1;
+    ]
+    scanner_runs = 0;
+    loop (w_idx:128 = 0 .. 128) [
+        w = mask_ptr@[w_idx];
+        if (w != 0) [
+            loop (st:64 = 0 .. 64) [
+                if (w != 0) [
+                    scanner_runs = scanner_runs + 1;
+                    w = blsr64(w);
+                ]
+            ]
+        ]
+    ]
+    if (scanner_runs != 0) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_ppm_header!(scratch) [
+    loop (i:32 = 0 .. 32) [
+        scratch@[i] = 0;
+    ]
+    scratch@[0 * 1] = 80;
+    scratch@[1 * 1] = 54;
+    scratch@[2 * 1] = 10;
+    scratch@[3 * 1] = 49;
+    scratch@[4 * 1] = 57;
+    scratch@[5 * 1] = 50;
+    scratch@[6 * 1] = 48;
+    scratch@[7 * 1] = 32;
+    scratch@[8 * 1] = 49;
+    scratch@[9 * 1] = 48;
+    scratch@[10 * 1] = 56;
+    scratch@[11 * 1] = 48;
+    scratch@[12 * 1] = 10;
+    scratch@[13 * 1] = 50;
+    scratch@[14 * 1] = 53;
+    scratch@[15 * 1] = 53;
+    scratch@[16 * 1] = 10;
+    if (scratch@[0 * 1] != 80) [
+        ret 1;
+    ]
+    if (scratch@[1 * 1] != 54) [
+        ret 2;
+    ]
+    if (scratch@[2 * 1] != 10) [
+        ret 3;
+    ]
+    if (scratch@[16 * 1] != 10) [
+        ret 4;
+    ]
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+    surface = slsp_create!(arena, 1920, 1080, 0);
+    if (surface == 0) [
+        sys_exit!(2);
+    ]
+    fb_ptr = surface.SLSP_WORD_FB_PTR;
+    mask_ptr = surface.SLSP_WORD_MASK_PTR;
+    tile_buf = arena_alloc_words!(arena, 128);
+    scratch = arena_alloc_words!(arena, 720);
+
+    // Test 1: Bitops ctz64
+    r1 = test_bitops_ctz();
+    if (r1 != 0) [
+        sys_exit!(101);
+    ]
+
+    // Test 2: Bitops blsr64
+    r2 = test_bitops_blsr();
+    if (r2 != 0) [
+        sys_exit!(102);
+    ]
+
+    // Test 3: Coordinate helpers
+    r3 = test_coord_helpers();
+    if (r3 != 0) [
+        sys_exit!(103);
+    ]
+
+    // Test 4: Surface descriptor initialization
+    r4 = test_surface_desc!(arena);
+    if (r4 != 0) [
+        sys_exit!(104);
+    ]
+
+    // Test 5: Single tile stamping
+    r5 = test_single_stamp!(mask_ptr);
+    if (r5 != 0) [
+        sys_exit!(105);
+    ]
+
+    // Test 6: Out of bounds stamp rejection
+    r6 = test_oob_stamp!(mask_ptr);
+    if (r6 != 0) [
+        sys_exit!(106);
+    ]
+
+    // Test 7: Bounding box stamping
+    r7 = test_box_stamp!(mask_ptr);
+    if (r7 != 0) [
+        sys_exit!(107);
+    ]
+
+    // Test 8: Heddle scanner bit extraction
+    r8 = test_heddle_scanner!(mask_ptr);
+    if (r8 != 0) [
+        sys_exit!(108);
+    ]
+
+    // Test 9: 16x16 L1 tile lockdown & beam flush
+    r9 = test_beam_flush!(fb_ptr, tile_buf);
+    if (r9 != 0) [
+        sys_exit!(109);
+    ]
+
+    // Test 10: Strided beam flush isolation
+    r10 = test_beam_flush_isolation!(fb_ptr, tile_buf);
+    if (r10 != 0) [
+        sys_exit!(110);
+    ]
+
+    // Test 11: Dirty mask clearing & idle state
+    r11 = test_idle_audit!(mask_ptr);
+    if (r11 != 0) [
+        sys_exit!(111);
+    ]
+
+    // Test 12: PPM binary header format
+    r12 = test_ppm_header!(scratch);
+    if (r12 != 0) [
+        sys_exit!(112);
+    ]
+
+    // All 12 tests passed!
+    sys_exit!(0);
+]

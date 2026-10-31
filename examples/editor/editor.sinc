@@ -1,0 +1,669 @@
+// ==========================================
+// examples/editor/editor.sinc
+// SAGR: Simple Text Editor (1:1 Native Resolution)
+// Resolution: 640x360 TrueColor RGBA
+// Font: Terminus 8x16 Monospaced Bitmap Font
+// ==========================================
+
+const ED_CANVAS_W = 640;
+const ED_CANVAS_H = 360;
+const ED_STRIDE_BYTES = 2560; // 640 * 4
+const ED_TOTAL_WORDS = 115200; // 640 * 360 / 2
+
+// Color Palette (RGBA8 packed into 32-bit unsigned words)
+const ED_COL_BG = 4280293912;          // Dark Canvas (#181a1f)
+const ED_COL_TITLE_BG = 4281017633;    // Title Bar Dark Slate (#21252b)
+const ED_COL_GUTTER_BG = 4280491034;   // Line Gutter Background (#1a1c22)
+const ED_COL_STATUS_BG = 4282067485;   // Status Bar Navy Slate (#1d2a3a)
+const ED_COL_BORDER = 4282200620;      // Panel Dividers (#2c313a)
+const ED_COL_BTN_FRAME = 4282989649;    // Action Button Frame (#3e4451)
+
+// Button Accent Colors
+const ED_COL_BTN_CLOSE = 4283995883;   // Red Close Button (#eb5757)
+const ED_COL_BTN_MIN = 4283287794;     // Yellow Minimize Button (#f2c94c)
+const ED_COL_BTN_MAX = 4284526119;     // Green Maximize Button (#27ae60)
+const ED_COL_BTN_NEW = 4293836641;     // Cyan New File Button (#61afef)
+const ED_COL_BTN_SAVE = 4286104472;    // Emerald Save File Button (#98c379)
+
+// Text & Cursor Colors
+const ED_COL_TEXT_WHITE = 4293453788;  // Bright White Text (#dcdfe4)
+const ED_COL_TEXT_GRAY = 4285689148;   // Gutter Gray Text (#5c6370)
+const ED_COL_TEXT_CYAN = 4293836641;   // Cyan Keyword Text (#61afef)
+const ED_COL_TEXT_GREEN = 4286104472;  // Emerald String Text (#98c379)
+const ED_COL_CURSOR = 4294937426;      // Electric Blue Cursor (#528bff)
+
+fn ed_set_pixel!(fb_ptr, x, y, rgba) [
+    if ((x < 0) | (x > 639) | (y < 0) | (y > 359)) [
+        ret 0;
+    ]
+    y_off = y * 2560;
+    x_off = x * 4;
+    ptr = fb_ptr + (y_off + x_off);
+    ptr@[0 * 1] = rgba & 255;
+    ptr@[1 * 1] = (rgba >> 8) & 255;
+    ptr@[2 * 1] = (rgba >> 16) & 255;
+    ptr@[3 * 1] = (rgba >> 24) & 255;
+    ret 0;
+]
+
+fn ed_fill_rect!(fb_ptr, rx, ry, rw, rh, rgba) [
+    y_end = ry + rh;
+    x_end = rx + rw;
+    if (x_end > 640) [ x_end = 640; ]
+    if (y_end > 360) [ y_end = 360; ]
+    if (rx < 0) [ rx = 0; ]
+    if (ry < 0) [ ry = 0; ]
+    loop (y:360 = ry .. y_end) [
+        loop (x:640 = rx .. x_end) [
+            ed_set_pixel!(fb_ptr, x, y, rgba);
+        ]
+    ]
+    ret 0;
+]
+
+fn ed_draw_circle!(fb_ptr, cx, cy, r, rgba) [
+    r_sq = r * r;
+    y0 = cy - r;
+    y1 = cy + r + 1;
+    if (y0 < 0) [ y0 = 0; ]
+    if (y1 > 360) [ y1 = 360; ]
+    loop (y:360 = y0 .. y1) [
+        dy = y - cy;
+        dy_sq = dy * dy;
+        x0 = cx - r;
+        x1 = cx + r + 1;
+        if (x0 < 0) [ x0 = 0; ]
+        if (x1 > 640) [ x1 = 640; ]
+        loop (x:640 = x0 .. x1) [
+            dx = x - cx;
+            dx_sq = dx * dx;
+            dist = dx_sq + dy_sq;
+            if (dist < r_sq) [
+                ed_set_pixel!(fb_ptr, x, y, rgba);
+            ]
+        ]
+    ]
+    ret 0;
+]
+
+fn ed_draw_char!(fb_ptr, font_ptr, px, py, ch, rgba) [
+    if ((ch < 0) | (ch > 255)) [ ret 0; ]
+    glyph_off = ch * 16;
+    glyph_ptr = font_ptr + glyph_off;
+    loop (r:16 = 0 .. 16) [
+        row_b = glyph_ptr@[r * 1];
+        if (row_b > 0) [
+            y = py + r;
+            loop (c:8 = 0 .. 8) [
+                shift = 7 - c;
+                bit = (row_b >> shift) & 1;
+                if (bit == 1) [
+                    ed_set_pixel!(fb_ptr, px + c, y, rgba);
+                ]
+            ]
+        ]
+    ]
+    ret 0;
+]
+
+fn ed_draw_str!(fb_ptr, font_ptr, px, py, str_ptr, str_len, rgba) [
+    cur_x = px;
+    loop (i:80 = 0 .. str_len) [
+        ch = str_ptr@[i * 1];
+        if (ch != 0) [
+            ed_draw_char!(fb_ptr, font_ptr, cur_x, py, ch, rgba);
+        ]
+        cur_x = cur_x + 8;
+    ]
+    ret 0;
+]
+
+fn ed_render_window!(fb_ptr, font_ptr, lines_buf, cur_line, cur_col, saved_timer) [
+    // 1. Fill Entire Canvas with Editor Background
+    ed_fill_rect!(fb_ptr, 0, 0, 640, 360, ED_COL_BG);
+
+    // 2. Top Title Bar Panel (y = 0..27)
+    ed_fill_rect!(fb_ptr, 0, 0, 640, 28, ED_COL_TITLE_BG);
+    ed_fill_rect!(fb_ptr, 0, 27, 640, 1, ED_COL_BORDER);
+
+    // 3. Window Control Buttons (Smooth circular buttons, radius 6)
+    ed_draw_circle!(fb_ptr, 18, 14, 6, ED_COL_BTN_CLOSE); // Red Close
+    ed_draw_circle!(fb_ptr, 38, 14, 6, ED_COL_BTN_MIN);   // Yellow Min
+    ed_draw_circle!(fb_ptr, 58, 14, 6, ED_COL_BTN_MAX);   // Green Max
+
+    // 4. Window Title: "SAGR SIMPLE EDIT"
+    // S=83, A=65, G=71, R=82, E=69, D=68, I=73, T=84
+    title_x = 88;
+    title_y = 6;
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 0,   title_y, 83, ED_COL_TEXT_WHITE); // S
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 8,   title_y, 65, ED_COL_TEXT_WHITE); // A
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 16,  title_y, 71, ED_COL_TEXT_WHITE); // G
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 24,  title_y, 82, ED_COL_TEXT_WHITE); // R
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 32,  title_y, 32, ED_COL_TEXT_WHITE); // ' '
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 40,  title_y, 83, ED_COL_TEXT_CYAN);  // S
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 48,  title_y, 73, ED_COL_TEXT_CYAN);  // I
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 56,  title_y, 77, ED_COL_TEXT_CYAN);  // M
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 64,  title_y, 80, ED_COL_TEXT_CYAN);  // P
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 72,  title_y, 76, ED_COL_TEXT_CYAN);  // L
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 80,  title_y, 69, ED_COL_TEXT_CYAN);  // E
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 88,  title_y, 32, ED_COL_TEXT_WHITE); // ' '
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 96,  title_y, 69, ED_COL_TEXT_WHITE); // E
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 104, title_y, 68, ED_COL_TEXT_WHITE); // D
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 112, title_y, 73, ED_COL_TEXT_WHITE); // I
+    ed_draw_char!(fb_ptr, font_ptr, title_x + 120, title_y, 84, ED_COL_TEXT_WHITE); // T
+
+    // 5. Action Buttons (Top Right)
+    // [NEW] Button (x = 480..540, y = 4..24)
+    ed_fill_rect!(fb_ptr, 480, 4, 60, 20, ED_COL_BTN_FRAME);
+    ed_draw_char!(fb_ptr, font_ptr, 498, 6, 78, ED_COL_BTN_NEW); // N
+    ed_draw_char!(fb_ptr, font_ptr, 506, 6, 69, ED_COL_BTN_NEW); // E
+    ed_draw_char!(fb_ptr, font_ptr, 514, 6, 87, ED_COL_BTN_NEW); // W
+
+    // [SAVE] Button (x = 550..620, y = 4..24)
+    ed_fill_rect!(fb_ptr, 550, 4, 70, 20, ED_COL_BTN_FRAME);
+    ed_draw_char!(fb_ptr, font_ptr, 567, 6, 83, ED_COL_BTN_SAVE); // S
+    ed_draw_char!(fb_ptr, font_ptr, 575, 6, 65, ED_COL_BTN_SAVE); // A
+    ed_draw_char!(fb_ptr, font_ptr, 583, 6, 86, ED_COL_BTN_SAVE); // V
+    ed_draw_char!(fb_ptr, font_ptr, 591, 6, 69, ED_COL_BTN_SAVE); // E
+
+    // 6. Editor Gutter (x = 0..39, y = 28..335)
+    ed_fill_rect!(fb_ptr, 0, 28, 40, 308, ED_COL_GUTTER_BG);
+    ed_fill_rect!(fb_ptr, 39, 28, 1, 308, ED_COL_BORDER); // Dividing Border
+
+    // Gutter Line Numbers: 1 through 18
+    loop (li:18 = 0 .. 18) [
+        line_num = li + 1;
+        gy = 32 + (li * 16);
+        if (line_num < 10) [
+            ed_draw_char!(fb_ptr, font_ptr, 20, gy, 48 + line_num, ED_COL_TEXT_GRAY);
+        ] else [
+            d1 = line_num / 10;
+            d0 = line_num - (d1 * 10);
+            ed_draw_char!(fb_ptr, font_ptr, 12, gy, 48 + d1, ED_COL_TEXT_GRAY);
+            ed_draw_char!(fb_ptr, font_ptr, 20, gy, 48 + d0, ED_COL_TEXT_GRAY);
+        ]
+    ]
+
+    // 7. Render Text Lines (18 lines of 72 chars)
+    loop (li:18 = 0 .. 18) [
+        line_py = 32 + (li * 16);
+        line_offset = li * 72;
+        line_ptr = lines_buf + line_offset;
+        ed_draw_str!(fb_ptr, font_ptr, 48, line_py, line_ptr, 72, ED_COL_TEXT_WHITE);
+    ]
+
+    // 8. Active Cursor (Electric Blue block)
+    cursor_px = 48 + (cur_col * 8);
+    cursor_py = 32 + (cur_line * 16);
+    ed_fill_rect!(fb_ptr, cursor_px, cursor_py, 8, 16, ED_COL_CURSOR);
+    // Draw inverted cursor character
+    cur_char_offset = (cur_line * 72) + cur_col;
+    cur_ch = lines_buf@[cur_char_offset * 1];
+    if (cur_ch > 32) [
+        ed_draw_char!(fb_ptr, font_ptr, cursor_px, cursor_py, cur_ch, ED_COL_BG);
+    ]
+
+    // 9. Bottom Status Bar (y = 336..359)
+    ed_fill_rect!(fb_ptr, 0, 336, 640, 24, ED_COL_STATUS_BG);
+    ed_fill_rect!(fb_ptr, 0, 336, 640, 1, ED_COL_BORDER);
+
+    // Left: "Ln X, Col Y"
+    status_y = 340;
+    ed_draw_char!(fb_ptr, font_ptr, 12, status_y, 76, ED_COL_BTN_SAVE); // L
+    ed_draw_char!(fb_ptr, font_ptr, 20, status_y, 110, ED_COL_BTN_SAVE);// n
+    ed_draw_char!(fb_ptr, font_ptr, 28, status_y, 32, ED_COL_BTN_SAVE); // ' '
+    cur_line_disp = cur_line + 1;
+    if (cur_line_disp < 10) [
+        ed_draw_char!(fb_ptr, font_ptr, 36, status_y, 48 + cur_line_disp, ED_COL_TEXT_WHITE);
+    ] else [
+        c_d1 = cur_line_disp / 10;
+        c_d0 = cur_line_disp - (c_d1 * 10);
+        ed_draw_char!(fb_ptr, font_ptr, 36, status_y, 48 + c_d1, ED_COL_TEXT_WHITE);
+        ed_draw_char!(fb_ptr, font_ptr, 44, status_y, 48 + c_d0, ED_COL_TEXT_WHITE);
+    ]
+    ed_draw_char!(fb_ptr, font_ptr, 56, status_y, 44, ED_COL_TEXT_GRAY); // ,
+    ed_draw_char!(fb_ptr, font_ptr, 64, status_y, 32, ED_COL_TEXT_GRAY); // ' '
+    ed_draw_char!(fb_ptr, font_ptr, 72, status_y, 67, ED_COL_BTN_SAVE);  // C
+    ed_draw_char!(fb_ptr, font_ptr, 80, status_y, 111, ED_COL_BTN_SAVE); // o
+    ed_draw_char!(fb_ptr, font_ptr, 88, status_y, 108, ED_COL_BTN_SAVE); // l
+    ed_draw_char!(fb_ptr, font_ptr, 96, status_y, 32, ED_COL_BTN_SAVE);  // ' '
+    cur_col_disp = cur_col + 1;
+    if (cur_col_disp < 10) [
+        ed_draw_char!(fb_ptr, font_ptr, 104, status_y, 48 + cur_col_disp, ED_COL_TEXT_WHITE);
+    ] else [
+        cc_d1 = cur_col_disp / 10;
+        cc_d0 = cur_col_disp - (cc_d1 * 10);
+        ed_draw_char!(fb_ptr, font_ptr, 104, status_y, 48 + cc_d1, ED_COL_TEXT_WHITE);
+        ed_draw_char!(fb_ptr, font_ptr, 112, status_y, 48 + cc_d0, ED_COL_TEXT_WHITE);
+    ]
+
+    // Middle Telemetry: "1:1 NATIVE PIXELS | 0 ALLOC"
+    ed_draw_char!(fb_ptr, font_ptr, 160, status_y, 49, ED_COL_TEXT_GRAY); // 1
+    ed_draw_char!(fb_ptr, font_ptr, 168, status_y, 58, ED_COL_TEXT_GRAY); // :
+    ed_draw_char!(fb_ptr, font_ptr, 176, status_y, 49, ED_COL_TEXT_GRAY); // 1
+    ed_draw_char!(fb_ptr, font_ptr, 184, status_y, 32, ED_COL_TEXT_GRAY);
+    ed_draw_char!(fb_ptr, font_ptr, 192, status_y, 78, ED_COL_TEXT_GRAY); // N
+    ed_draw_char!(fb_ptr, font_ptr, 200, status_y, 65, ED_COL_TEXT_GRAY); // A
+    ed_draw_char!(fb_ptr, font_ptr, 208, status_y, 84, ED_COL_TEXT_GRAY); // T
+    ed_draw_char!(fb_ptr, font_ptr, 216, status_y, 73, ED_COL_TEXT_GRAY); // I
+    ed_draw_char!(fb_ptr, font_ptr, 224, status_y, 86, ED_COL_TEXT_GRAY); // V
+    ed_draw_char!(fb_ptr, font_ptr, 232, status_y, 69, ED_COL_TEXT_GRAY); // E
+    ed_draw_char!(fb_ptr, font_ptr, 240, status_y, 32, ED_COL_TEXT_GRAY);
+    ed_draw_char!(fb_ptr, font_ptr, 248, status_y, 80, ED_COL_TEXT_GRAY); // P
+    ed_draw_char!(fb_ptr, font_ptr, 256, status_y, 73, ED_COL_TEXT_GRAY); // I
+    ed_draw_char!(fb_ptr, font_ptr, 264, status_y, 88, ED_COL_TEXT_GRAY); // X
+    ed_draw_char!(fb_ptr, font_ptr, 272, status_y, 69, ED_COL_TEXT_GRAY); // E
+    ed_draw_char!(fb_ptr, font_ptr, 280, status_y, 76, ED_COL_TEXT_GRAY); // L
+    ed_draw_char!(fb_ptr, font_ptr, 288, status_y, 83, ED_COL_TEXT_GRAY); // S
+
+    // Right: Flash Saved or Ready
+    if (saved_timer > 0) [
+        // "[SAVED TO DISK]"
+        ed_draw_char!(fb_ptr, font_ptr, 480, status_y, 91, ED_COL_BTN_SAVE);  // [
+        ed_draw_char!(fb_ptr, font_ptr, 488, status_y, 83, ED_COL_BTN_SAVE);  // S
+        ed_draw_char!(fb_ptr, font_ptr, 496, status_y, 65, ED_COL_BTN_SAVE);  // A
+        ed_draw_char!(fb_ptr, font_ptr, 504, status_y, 86, ED_COL_BTN_SAVE);  // V
+        ed_draw_char!(fb_ptr, font_ptr, 512, status_y, 69, ED_COL_BTN_SAVE);  // E
+        ed_draw_char!(fb_ptr, font_ptr, 520, status_y, 68, ED_COL_BTN_SAVE);  // D
+        ed_draw_char!(fb_ptr, font_ptr, 528, status_y, 32, ED_COL_BTN_SAVE);  // ' '
+        ed_draw_char!(fb_ptr, font_ptr, 536, status_y, 84, ED_COL_BTN_SAVE);  // T
+        ed_draw_char!(fb_ptr, font_ptr, 544, status_y, 79, ED_COL_BTN_SAVE);  // O
+        ed_draw_char!(fb_ptr, font_ptr, 552, status_y, 32, ED_COL_BTN_SAVE);  // ' '
+        ed_draw_char!(fb_ptr, font_ptr, 560, status_y, 68, ED_COL_BTN_SAVE);  // D
+        ed_draw_char!(fb_ptr, font_ptr, 568, status_y, 73, ED_COL_BTN_SAVE);  // I
+        ed_draw_char!(fb_ptr, font_ptr, 576, status_y, 83, ED_COL_BTN_SAVE);  // S
+        ed_draw_char!(fb_ptr, font_ptr, 584, status_y, 75, ED_COL_BTN_SAVE);  // K
+        ed_draw_char!(fb_ptr, font_ptr, 592, status_y, 93, ED_COL_BTN_SAVE);  // ]
+    ] else [
+        ed_draw_char!(fb_ptr, font_ptr, 560, status_y, 82, ED_COL_TEXT_CYAN); // R
+        ed_draw_char!(fb_ptr, font_ptr, 568, status_y, 69, ED_COL_TEXT_CYAN); // E
+        ed_draw_char!(fb_ptr, font_ptr, 576, status_y, 65, ED_COL_TEXT_CYAN); // A
+        ed_draw_char!(fb_ptr, font_ptr, 584, status_y, 68, ED_COL_TEXT_CYAN); // D
+        ed_draw_char!(fb_ptr, font_ptr, 592, status_y, 89, ED_COL_TEXT_CYAN); // Y
+    ]
+
+    ret 0;
+]
+
+fn ed_save_to_disk!(path_buf, lines_buf) [
+    fd = sys_open_create!(path_buf);
+    if (fd < 0) [ ret -1; ]
+    loop (li:18 = 0 .. 18) [
+        line_offset = li * 72;
+        line_ptr = lines_buf + line_offset;
+        len = 0;
+        loop (c:72 = 0 .. 72) [
+            ch = line_ptr@[c * 1];
+            if (ch != 0) [ len = c + 1; ]
+        ]
+        if (len > 0) [
+            sys_write!(fd, line_ptr, len);
+        ]
+        newline_ptr = lines_buf + 1400;
+        newline_ptr@[0 * 1] = 10;
+        sys_write!(fd, newline_ptr, 1);
+    ]
+    sys_close!(fd);
+    ret 0;
+]
+
+fn ed_dump_ppm!(path_buf, fb_ptr, scratch_row) [
+    fd = sys_open_create!(path_buf);
+    if (fd < 0) [ ret -1; ]
+
+    // Write Netpbm P6 header: "P6\n640 360\n255\n" (15 bytes)
+    scratch_row@[0 * 1]  = 80;  // P
+    scratch_row@[1 * 1]  = 54;  // 6
+    scratch_row@[2 * 1]  = 10;  // \n
+    scratch_row@[3 * 1]  = 54;  // 6
+    scratch_row@[4 * 1]  = 52;  // 4
+    scratch_row@[5 * 1]  = 48;  // 0
+    scratch_row@[6 * 1]  = 32;  // ' '
+    scratch_row@[7 * 1]  = 51;  // 3
+    scratch_row@[8 * 1]  = 54;  // 6
+    scratch_row@[9 * 1]  = 48;  // 0
+    scratch_row@[10 * 1] = 10;  // \n
+    scratch_row@[11 * 1] = 50;  // 2
+    scratch_row@[12 * 1] = 53;  // 5
+    scratch_row@[13 * 1] = 53;  // 5
+    scratch_row@[14 * 1] = 10;  // \n
+    sys_write!(fd, scratch_row, 15);
+
+    row_bytes = 640 * 3;
+    loop (y:360 = 0 .. 360) [
+        fb_row = fb_ptr + (y * 2560);
+        loop (x:640 = 0 .. 640) [
+            px_ptr = fb_row + (x * 4);
+            r = px_ptr@[0 * 1];
+            g = px_ptr@[1 * 1];
+            b = px_ptr@[2 * 1];
+            out_ptr = scratch_row + (x * 3);
+            out_ptr@[0 * 1] = r;
+            out_ptr@[1 * 1] = g;
+            out_ptr@[2 * 1] = b;
+        ]
+        sys_write!(fd, scratch_row, row_bytes);
+    ]
+    sys_close!(fd);
+    ret 0;
+]
+
+fn ed_set_str!(buf, offset, s_ptr, s_len) [
+    dst = buf + offset;
+    loop (i:72 = 0 .. s_len) [
+        dst@[i * 1] = s_ptr@[i * 1];
+    ]
+    ret 0;
+]
+
+fn ed_init_sample_text!(lines_buf) [
+    // Clear all lines
+    loop (i:1440 = 0 .. 1440) [
+        lines_buf@[i * 1] = 0;
+    ]
+
+    // Line 0: "// =========================================="
+    l0 = lines_buf;
+    l0@[0 * 1] = 47; l0@[1 * 1] = 47;
+    loop (i:40 = 2 .. 42) [ l0@[i * 1] = 61; ]
+
+    // Line 1: "// SAGR Simple Desktop Editor"
+    l1 = lines_buf + 72;
+    l1@[0 * 1] = 47; l1@[1 * 1] = 47; l1@[2 * 1] = 32;
+    l1@[3 * 1] = 83; l1@[4 * 1] = 65; l1@[5 * 1] = 71; l1@[6 * 1] = 82; l1@[7 * 1] = 32;
+    l1@[8 * 1] = 83; l1@[9 * 1] = 105; l1@[10 * 1] = 109; l1@[11 * 1] = 112; l1@[12 * 1] = 108;
+    l1@[13 * 1] = 101; l1@[14 * 1] = 32;
+    l1@[15 * 1] = 68; l1@[16 * 1] = 101; l1@[17 * 1] = 115; l1@[18 * 1] = 107; l1@[19 * 1] = 116;
+    l1@[20 * 1] = 111; l1@[21 * 1] = 112; l1@[22 * 1] = 32;
+    l1@[23 * 1] = 69; l1@[24 * 1] = 100; l1@[25 * 1] = 105; l1@[26 * 1] = 116; l1@[27 * 1] = 111;
+    l1@[28 * 1] = 114;
+    l1@[29 * 1] = 0; l1@[30 * 1] = 0; l1@[31 * 1] = 0;
+
+    // Line 2: "// Resolution: 640x360 @ 1:1 Native Scale"
+    l2 = lines_buf + 144;
+    l2@[0 * 1] = 47; l2@[1 * 1] = 47; l2@[2 * 1] = 32;
+    l2@[3 * 1] = 82; l2@[4 * 1] = 101; l2@[5 * 1] = 115; l2@[6 * 1] = 58; l2@[7 * 1] = 32;
+    l2@[8 * 1] = 54; l2@[9 * 1] = 52; l2@[10 * 1] = 48; l2@[11 * 1] = 120; l2@[12 * 1] = 51;
+    l2@[13 * 1] = 54; l2@[14 * 1] = 48; l2@[15 * 1] = 32; l2@[16 * 1] = 64; l2@[17 * 1] = 32;
+    l2@[18 * 1] = 49; l2@[19 * 1] = 58; l2@[20 * 1] = 49; l2@[21 * 1] = 32;
+    l2@[22 * 1] = 78; l2@[23 * 1] = 97; l2@[24 * 1] = 116; l2@[25 * 1] = 105; l2@[26 * 1] = 118;
+    l2@[27 * 1] = 101; l2@[28 * 1] = 32;
+    l2@[29 * 1] = 80; l2@[30 * 1] = 105; l2@[31 * 1] = 120; l2@[32 * 1] = 101; l2@[33 * 1] = 108;
+    l2@[34 * 1] = 115;
+
+    // Line 4: "const CANVAS_WIDTH  = 640;"
+    l4 = lines_buf + 288;
+    l4@[0 * 1] = 99; l4@[1 * 1] = 111; l4@[2 * 1] = 110; l4@[3 * 1] = 115; l4@[4 * 1] = 116;
+    l4@[5 * 1] = 32; l4@[6 * 1] = 67; l4@[7 * 1] = 65; l4@[8 * 1] = 78; l4@[9 * 1] = 86;
+    l4@[10 * 1] = 65; l4@[11 * 1] = 83; l4@[12 * 1] = 95; l4@[13 * 1] = 87; l4@[14 * 1] = 32;
+    l4@[15 * 1] = 61; l4@[16 * 1] = 32; l4@[17 * 1] = 54; l4@[18 * 1] = 52; l4@[19 * 1] = 48;
+    l4@[20 * 1] = 59;
+
+    // Line 5: "const CANVAS_HEIGHT = 360;"
+    l5 = lines_buf + 360;
+    l5@[0 * 1] = 99; l5@[1 * 1] = 111; l5@[2 * 1] = 110; l5@[3 * 1] = 115; l5@[4 * 1] = 116;
+    l5@[5 * 1] = 32; l5@[6 * 1] = 67; l5@[7 * 1] = 65; l5@[8 * 1] = 78; l5@[9 * 1] = 86;
+    l5@[10 * 1] = 65; l5@[11 * 1] = 83; l5@[12 * 1] = 95; l5@[13 * 1] = 72; l5@[14 * 1] = 32;
+    l5@[15 * 1] = 61; l5@[16 * 1] = 32; l5@[17 * 1] = 51; l5@[18 * 1] = 54; l5@[19 * 1] = 48;
+    l5@[20 * 1] = 59;
+
+    // Line 7: "fn main!() ["
+    l7 = lines_buf + 504;
+    l7@[0 * 1] = 102; l7@[1 * 1] = 110; l7@[2 * 1] = 32;
+    l7@[3 * 1] = 109; l7@[4 * 1] = 97; l7@[5 * 1] = 105; l7@[6 * 1] = 110; l7@[7 * 1] = 33;
+    l7@[8 * 1] = 40; l7@[9 * 1] = 41; l7@[10 * 1] = 32; l7@[11 * 1] = 91;
+
+    // Line 8: "    slsp_init!(fb_ptr, 640, 360);"
+    l8 = lines_buf + 576;
+    l8@[0 * 1] = 32; l8@[1 * 1] = 32; l8@[2 * 1] = 32; l8@[3 * 1] = 32;
+    l8@[4 * 1] = 115; l8@[5 * 1] = 108; l8@[6 * 1] = 115; l8@[7 * 1] = 112; l8@[8 * 1] = 95;
+    l8@[9 * 1] = 105; l8@[10 * 1] = 110; l8@[11 * 1] = 105; l8@[12 * 1] = 116; l8@[13 * 1] = 33;
+    l8@[14 * 1] = 40; l8@[15 * 1] = 102; l8@[16 * 1] = 98; l8@[17 * 1] = 95; l8@[18 * 1] = 112;
+    l8@[19 * 1] = 116; l8@[20 * 1] = 114; l8@[21 * 1] = 44; l8@[22 * 1] = 32;
+    l8@[23 * 1] = 54; l8@[24 * 1] = 52; l8@[25 * 1] = 48; l8@[26 * 1] = 44; l8@[27 * 1] = 32;
+    l8@[28 * 1] = 51; l8@[29 * 1] = 54; l8@[30 * 1] = 48; l8@[31 * 1] = 41; l8@[32 * 1] = 59;
+
+    // Line 9: "    ret 0;"
+    l9 = lines_buf + 648;
+    l9@[0 * 1] = 32; l9@[1 * 1] = 32; l9@[2 * 1] = 32; l9@[3 * 1] = 32;
+    l9@[4 * 1] = 114; l9@[5 * 1] = 101; l9@[6 * 1] = 116; l9@[7 * 1] = 32;
+    l9@[8 * 1] = 48; l9@[9 * 1] = 59;
+
+    // Line 10: "]"
+    l10 = lines_buf + 720;
+    l10@[0 * 1] = 93;
+
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    base = 536870912;
+    arena = arena_init!(base~, 67108864);
+    if (arena == 0) [ sys_exit!(1); ]
+
+    fb_ptr = arena_alloc_words!(arena, 115200);   // 640x360 TrueColor RGBA8
+    font_ptr = arena_alloc_words!(arena, 512);    // Terminus 8x16 font (4096 bytes)
+    lines_buf = arena_alloc_words!(arena, 256);   // 18 lines x 72 chars
+    scratch_row = arena_alloc_words!(arena, 512); // 1 row of PPM output (1920 bytes)
+    key_buf = arena_alloc_words!(arena, 4);
+    sleep_spec = arena_alloc_words!(arena, 4);
+    save_path = arena_alloc_words!(arena, 8);
+    ppm_path = arena_alloc_words!(arena, 8);
+    font_path = arena_alloc_words!(arena, 8);
+    termios_buf = arena_alloc_words!(arena, 16);
+
+    is_tty = 0;
+    ret_ioctl = sys_ioctl!(0, 21505, termios_buf);
+    if (ret_ioctl == 0) [ is_tty = 1; ]
+
+    // Initialize Font Path: "examples/editor/font_terminus.bin\0"
+    f_idx = 0;
+    font_path@[f_idx * 1] = 101; f_idx = f_idx + 1; // e
+    font_path@[f_idx * 1] = 120; f_idx = f_idx + 1; // x
+    font_path@[f_idx * 1] = 97;  f_idx = f_idx + 1; // a
+    font_path@[f_idx * 1] = 109; f_idx = f_idx + 1; // m
+    font_path@[f_idx * 1] = 112; f_idx = f_idx + 1; // p
+    font_path@[f_idx * 1] = 108; f_idx = f_idx + 1; // l
+    font_path@[f_idx * 1] = 101; f_idx = f_idx + 1; // e
+    font_path@[f_idx * 1] = 115; f_idx = f_idx + 1; // s
+    font_path@[f_idx * 1] = 47;  f_idx = f_idx + 1; // /
+    font_path@[f_idx * 1] = 101; f_idx = f_idx + 1; // e
+    font_path@[f_idx * 1] = 100; f_idx = f_idx + 1; // d
+    font_path@[f_idx * 1] = 105; f_idx = f_idx + 1; // i
+    font_path@[f_idx * 1] = 116; f_idx = f_idx + 1; // t
+    font_path@[f_idx * 1] = 111; f_idx = f_idx + 1; // o
+    font_path@[f_idx * 1] = 114; f_idx = f_idx + 1; // r
+    font_path@[f_idx * 1] = 47;  f_idx = f_idx + 1; // /
+    font_path@[f_idx * 1] = 102; f_idx = f_idx + 1; // f
+    font_path@[f_idx * 1] = 111; f_idx = f_idx + 1; // o
+    font_path@[f_idx * 1] = 110; f_idx = f_idx + 1; // n
+    font_path@[f_idx * 1] = 116; f_idx = f_idx + 1; // t
+    font_path@[f_idx * 1] = 95;  f_idx = f_idx + 1; // _
+    font_path@[f_idx * 1] = 116; f_idx = f_idx + 1; // t
+    font_path@[f_idx * 1] = 101; f_idx = f_idx + 1; // e
+    font_path@[f_idx * 1] = 114; f_idx = f_idx + 1; // r
+    font_path@[f_idx * 1] = 109; f_idx = f_idx + 1; // m
+    font_path@[f_idx * 1] = 105; f_idx = f_idx + 1; // i
+    font_path@[f_idx * 1] = 110; f_idx = f_idx + 1; // n
+    font_path@[f_idx * 1] = 117; f_idx = f_idx + 1; // u
+    font_path@[f_idx * 1] = 115; f_idx = f_idx + 1; // s
+    font_path@[f_idx * 1] = 46;  f_idx = f_idx + 1; // .
+    font_path@[f_idx * 1] = 98;  f_idx = f_idx + 1; // b
+    font_path@[f_idx * 1] = 105; f_idx = f_idx + 1; // i
+    font_path@[f_idx * 1] = 110; f_idx = f_idx + 1; // n
+    font_path@[f_idx * 1] = 0;
+
+    // Load Terminus 8x16 font file
+    fd_font = sys_open_read!(font_path);
+    if (fd_font > 0) [
+        sys_read!(fd_font, font_ptr, 4096);
+        sys_close!(fd_font);
+    ]
+
+    // Initialize Save Path: "scratch/editor_saved.txt\0"
+    s_idx = 0;
+    save_path@[s_idx * 1] = 115; s_idx = s_idx + 1; // s
+    save_path@[s_idx * 1] = 99;  s_idx = s_idx + 1; // c
+    save_path@[s_idx * 1] = 114; s_idx = s_idx + 1; // r
+    save_path@[s_idx * 1] = 97;  s_idx = s_idx + 1; // a
+    save_path@[s_idx * 1] = 116; s_idx = s_idx + 1; // t
+    save_path@[s_idx * 1] = 99;  s_idx = s_idx + 1; // c
+    save_path@[s_idx * 1] = 104; s_idx = s_idx + 1; // h
+    save_path@[s_idx * 1] = 47;  s_idx = s_idx + 1; // /
+    save_path@[s_idx * 1] = 101; s_idx = s_idx + 1; // e
+    save_path@[s_idx * 1] = 100; s_idx = s_idx + 1; // d
+    save_path@[s_idx * 1] = 105; s_idx = s_idx + 1; // i
+    save_path@[s_idx * 1] = 116; s_idx = s_idx + 1; // t
+    save_path@[s_idx * 1] = 111; s_idx = s_idx + 1; // o
+    save_path@[s_idx * 1] = 114; s_idx = s_idx + 1; // r
+    save_path@[s_idx * 1] = 95;  s_idx = s_idx + 1; // _
+    save_path@[s_idx * 1] = 115; s_idx = s_idx + 1; // s
+    save_path@[s_idx * 1] = 97;  s_idx = s_idx + 1; // a
+    save_path@[s_idx * 1] = 118; s_idx = s_idx + 1; // v
+    save_path@[s_idx * 1] = 101; s_idx = s_idx + 1; // e
+    save_path@[s_idx * 1] = 100; s_idx = s_idx + 1; // d
+    save_path@[s_idx * 1] = 46;  s_idx = s_idx + 1; // .
+    save_path@[s_idx * 1] = 116; s_idx = s_idx + 1; // t
+    save_path@[s_idx * 1] = 120; s_idx = s_idx + 1; // x
+    save_path@[s_idx * 1] = 116; s_idx = s_idx + 1; // t
+    save_path@[s_idx * 1] = 0;
+
+    // Initialize PPM Path: "scratch/editor.ppm\0"
+    p_idx = 0;
+    ppm_path@[p_idx * 1] = 115; p_idx = p_idx + 1; // s
+    ppm_path@[p_idx * 1] = 99;  p_idx = p_idx + 1; // c
+    ppm_path@[p_idx * 1] = 114; p_idx = p_idx + 1; // r
+    ppm_path@[p_idx * 1] = 97;  p_idx = p_idx + 1; // a
+    ppm_path@[p_idx * 1] = 116; p_idx = p_idx + 1; // t
+    ppm_path@[p_idx * 1] = 99;  p_idx = p_idx + 1; // c
+    ppm_path@[p_idx * 1] = 104; p_idx = p_idx + 1; // h
+    ppm_path@[p_idx * 1] = 47;  p_idx = p_idx + 1; // /
+    ppm_path@[p_idx * 1] = 101; p_idx = p_idx + 1; // e
+    ppm_path@[p_idx * 1] = 100; p_idx = p_idx + 1; // d
+    ppm_path@[p_idx * 1] = 105; p_idx = p_idx + 1; // i
+    ppm_path@[p_idx * 1] = 116; p_idx = p_idx + 1; // t
+    ppm_path@[p_idx * 1] = 111; p_idx = p_idx + 1; // o
+    ppm_path@[p_idx * 1] = 114; p_idx = p_idx + 1; // r
+    ppm_path@[p_idx * 1] = 46;  p_idx = p_idx + 1; // .
+    ppm_path@[p_idx * 1] = 112; p_idx = p_idx + 1; // p
+    ppm_path@[p_idx * 1] = 112; p_idx = p_idx + 1; // p
+    ppm_path@[p_idx * 1] = 109; p_idx = p_idx + 1; // m
+    ppm_path@[p_idx * 1] = 0;
+
+    // 28ms Sleep Spec (~35 FPS)
+    sleep_spec@[0] = 0;
+    sleep_spec@[1] = 28000000;
+
+    ed_init_sample_text!(lines_buf);
+
+    cur_line = 7;
+    cur_col = 12;
+    saved_timer = 0;
+
+    // Initial PPM Dump
+    ed_render_window!(fb_ptr, font_ptr, lines_buf, cur_line, cur_col, saved_timer);
+    ed_dump_ppm!(ppm_path, fb_ptr, scratch_row);
+
+    // Interactive Loop
+    loop (frame:100000 = 0 .. 100000) [
+        ed_render_window!(fb_ptr, font_ptr, lines_buf, cur_line, cur_col, saved_timer);
+        if (saved_timer > 0) [
+            saved_timer = saved_timer - 1;
+        ]
+
+        sys_nanosleep!(sleep_spec);
+
+        nread = sys_read!(0, key_buf, 1);
+        if (nread < 1) [
+            if (is_tty == 0) [
+                sys_exit!(0);
+            ]
+        ] else [
+            k0 = key_buf@[0 * 1];
+
+            // Esc (27)
+            if (k0 == 27) [
+                n2 = sys_read!(0, key_buf + 1, 2);
+                if (n2 > 0) [
+                    k1 = key_buf@[1 * 1];
+                    k2 = key_buf@[2 * 1];
+                    if (k1 == 91) [
+                        if (k2 == 65) [ if (cur_line > 0) [ cur_line = cur_line - 1; ] ]
+                        if (k2 == 66) [ if (cur_line < 17) [ cur_line = cur_line + 1; ] ]
+                        if (k2 == 67) [ if (cur_col < 71) [ cur_col = cur_col + 1; ] ]
+                        if (k2 == 68) [ if (cur_col > 0) [ cur_col = cur_col - 1; ] ]
+                    ]
+                ] else [
+                    sys_exit!(0);
+                ]
+            ]
+
+            // 'q' / 'Q' to quit
+            if ((k0 == 113) | (k0 == 81)) [
+                sys_exit!(0);
+            ]
+
+            // 'h' / 'H': Left
+            if ((k0 == 104) | (k0 == 72)) [
+                if (cur_col > 0) [ cur_col = cur_col - 1; ]
+            ]
+            // 'l' / 'L': Right
+            if ((k0 == 108) | (k0 == 76)) [
+                if (cur_col < 71) [ cur_col = cur_col + 1; ]
+            ]
+            // 'k' / 'K': Up
+            if ((k0 == 107) | (k0 == 75)) [
+                if (cur_line > 0) [ cur_line = cur_line - 1; ]
+            ]
+            // 'j' / 'J': Down
+            if ((k0 == 106) | (k0 == 74)) [
+                if (cur_line < 17) [ cur_line = cur_line + 1; ]
+            ]
+
+            // 's' / 'S': Save File
+            if ((k0 == 115) | (k0 == 83)) [
+                ed_save_to_disk!(save_path, lines_buf);
+                saved_timer = 25;
+            ]
+
+            // 'n' / 'N': New File (clear text)
+            if ((k0 == 110) | (k0 == 78)) [
+                loop (clr_i:1440 = 0 .. 1440) [
+                    lines_buf@[clr_i * 1] = 0;
+                ]
+                cur_line = 0;
+                cur_col = 0;
+            ]
+
+            // 'p' / 'P': Dump PPM Screenshot
+            if ((k0 == 112) | (k0 == 80)) [
+                ed_render_window!(fb_ptr, font_ptr, lines_buf, cur_line, cur_col, saved_timer);
+                ed_dump_ppm!(ppm_path, fb_ptr, scratch_row);
+            ]
+
+            // Backspace (127 or 8)
+            if ((k0 == 127) | (k0 == 8)) [
+                if (cur_col > 0) [
+                    cur_col = cur_col - 1;
+                    off_del = (cur_line * 72) + cur_col;
+                    lines_buf@[off_del * 1] = 32; // Space
+                ]
+            ]
+
+            // Printable Character Insertion (ASCII 32..126)
+            if ((k0 > 31) & (k0 < 127)) [
+                is_action = ((k0 == 113) | (k0 == 81) | (k0 == 115) | (k0 == 83) | (k0 == 110) | (k0 == 78) | (k0 == 112) | (k0 == 80) | (k0 == 104) | (k0 == 106) | (k0 == 107) | (k0 == 108));
+                if (is_action == 0) [
+                    off_char = (cur_line * 72) + cur_col;
+                    lines_buf@[off_char * 1] = k0;
+                    if (cur_col < 71) [
+                        cur_col = cur_col + 1;
+                    ]
+                ]
+            ]
+        ]
+    ]
+
+    sys_exit!(0);
+]

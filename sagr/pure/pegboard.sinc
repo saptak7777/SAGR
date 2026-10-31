@@ -1,0 +1,304 @@
+// ==========================================
+// sagr/pure/pegboard.sinc
+// Path Ingestion, Y-Monotonic Splitter & Clipper
+// ==========================================
+
+fn pb_transform_x(x, y, m00, m01, tx) [
+    x_scaled = (x * m00) >> 16;
+    y_scaled = (y * m01) >> 16;
+    res = x_scaled + y_scaled + tx;
+    ret res;
+]
+
+fn pb_transform_y(x, y, m10, m11, ty) [
+    x_scaled = (x * m10) >> 16;
+    y_scaled = (y * m11) >> 16;
+    res = x_scaled + y_scaled + ty;
+    ret res;
+]
+
+fn pb_clamp_x(x) [
+    if (x < 0) [
+        ret 0;
+    ]
+    if (x > 491520) [
+        ret 491520;
+    ]
+    ret x;
+]
+
+fn pb_clamp_y(y) [
+    if (y < 0) [
+        ret 0;
+    ]
+    if (y > 276480) [
+        ret 276480;
+    ]
+    ret y;
+]
+
+fn pb_emit_line_raw!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
+    idx = out_idx_ptr@[0];
+    off = idx * 4;
+    w0 = (1 << 56) | rgba;
+    w1 = (x0 << 32) | (y0 & 4294967295);
+    w2 = (x1 << 32) | (y1 & 4294967295);
+    out_tape@[off] = w0;
+    out_tape@[(off + 1)] = w1;
+    out_tape@[(off + 2)] = w2;
+    out_tape@[(off + 3)] = 0;
+    out_idx_ptr@[0] = idx + 1;
+    ret 0;
+]
+
+fn pb_clip_line!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
+    both_above = (y0 < 0) & (y1 < 0);
+    if (both_above == 1) [
+        ret 0;
+    ]
+    both_below = (y0 > 276480) & (y1 > 276480);
+    if (both_below == 1) [
+        ret 0;
+    ]
+
+    dy = y1 - y0;
+    dx = x1 - x0;
+
+    if ((y0 < 0) & (y1 > -1)) [
+        diff_y0 = 0 - y0;
+        step_prod0 = diff_y0 * dx;
+        step_x0 = step_prod0 / dy;
+        x0 = x0 + step_x0;
+        y0 = 0;
+    ]
+    if ((y1 < 0) & (y0 > -1)) [
+        diff_y1 = 0 - y1;
+        dx_rev1 = x0 - x1;
+        dy_rev1 = y0 - y1;
+        step_prod1 = diff_y1 * dx_rev1;
+        step_x1 = step_prod1 / dy_rev1;
+        x1 = x1 + step_x1;
+        y1 = 0;
+    ]
+
+    if ((y0 > 276480) & (y1 < 276481)) [
+        diff_y0_top = 276480 - y0;
+        step_prod0_top = diff_y0_top * dx;
+        step_x0_top = step_prod0_top / dy;
+        x0 = x0 + step_x0_top;
+        y0 = 276480;
+    ]
+    if ((y1 > 276480) & (y0 < 276481)) [
+        diff_y1_top = 276480 - y1;
+        dx_rev1_top = x0 - x1;
+        dy_rev1_top = y0 - y1;
+        step_prod1_top = diff_y1_top * dx_rev1_top;
+        step_x1_top = step_prod1_top / dy_rev1_top;
+        x1 = x1 + step_x1_top;
+        y1 = 276480;
+    ]
+
+    x0 = pb_clamp_x(x0);
+    x1 = pb_clamp_x(x1);
+    y0 = pb_clamp_y(y0);
+    y1 = pb_clamp_y(y1);
+
+    if (y0 == y1) [
+        ret 0;
+    ]
+
+    pb_emit_line_raw!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba);
+    ret 0;
+]
+
+fn pb_emit_quad_leaf!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba) [
+    x0 = pb_clamp_x(x0);
+    x1 = pb_clamp_x(x1);
+    x2 = pb_clamp_x(x2);
+    y0 = pb_clamp_y(y0);
+    y1 = pb_clamp_y(y1);
+    y2 = pb_clamp_y(y2);
+
+    if (y0 == y2) [
+        if (y0 == y1) [
+            ret 0;
+        ]
+    ]
+
+    idx = out_idx_ptr@[0];
+    off = idx * 4;
+    w0 = (2 << 56) | rgba;
+    w1 = (x0 << 32) | (y0 & 4294967295);
+    w2 = (x1 << 32) | (y1 & 4294967295);
+    w3 = (x2 << 32) | (y2 & 4294967295);
+    out_tape@[off] = w0;
+    out_tape@[(off + 1)] = w1;
+    out_tape@[(off + 2)] = w2;
+    out_tape@[(off + 3)] = w3;
+    out_idx_ptr@[0] = idx + 1;
+    ret 0;
+]
+
+fn pb_emit_quad!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba) [
+    both_above = (y0 < 0) & (y1 < 0);
+    if ((both_above == 1) & (y2 < 0)) [
+        ret 0;
+    ]
+    both_below = (y0 > 276480) & (y1 > 276480);
+    if ((both_below == 1) & (y2 > 276480)) [
+        ret 0;
+    ]
+
+    has_peak = (y1 > y0) & (y1 > y2);
+    has_valley = (y1 < y0) & (y1 < y2);
+    has_extremum = has_peak | has_valley;
+
+    if (has_extremum == 0) [
+        pb_emit_quad_leaf!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba);
+        ret 0;
+    ]
+
+    num = y0 - y1;
+    den = (y0 - y1) + (y2 - y1);
+    if (den == 0) [
+        den = 1;
+    ]
+
+    t_shift = num << 16;
+    t_q16 = t_shift / den;
+    if (t_q16 < 1) [
+        t_q16 = 1;
+    ]
+    if (t_q16 > 65535) [
+        t_q16 = 65535;
+    ]
+
+    dx01 = x1 - x0;
+    dy01 = y1 - y0;
+    prod_x01 = dx01 * t_q16;
+    prod_y01 = dy01 * t_q16;
+    sx01 = prod_x01 >> 16;
+    sy01 = prod_y01 >> 16;
+    x01 = x0 + sx01;
+    y01 = y0 + sy01;
+
+    dx12 = x2 - x1;
+    dy12 = y2 - y1;
+    prod_x12 = dx12 * t_q16;
+    prod_y12 = dy12 * t_q16;
+    sx12 = prod_x12 >> 16;
+    sy12 = prod_y12 >> 16;
+    x12 = x1 + sx12;
+    y12 = y1 + sy12;
+
+    dx_mid = x12 - x01;
+    dy_mid = y12 - y01;
+    prod_xmid = dx_mid * t_q16;
+    prod_ymid = dy_mid * t_q16;
+    sxmid = prod_xmid >> 16;
+    symid = prod_ymid >> 16;
+    xmid = x01 + sxmid;
+    ymid = y01 + symid;
+
+    pb_emit_quad_leaf!(out_tape, out_idx_ptr, x0, y0, x01, y01, xmid, ymid, rgba);
+    pb_emit_quad_leaf!(out_tape, out_idx_ptr, xmid, ymid, x12, y12, x2, y2, rgba);
+    ret 0;
+]
+
+fn pb_approx_norm(dx, dy) [
+    res = bo_octagonal_norm(dx, dy);
+    if (res < 1) [
+        res = 1;
+    ]
+    ret res;
+]
+
+fn pb_stroke_line!(out_tape, out_idx_ptr, x0, y0, x1, y1, half_w, rgba) [
+    dx = x1 - x0;
+    dy = y1 - y0;
+    len = pb_approx_norm(dx, dy);
+
+    neg_dy = 0 - dy;
+    norm_x = neg_dy * half_w;
+    norm_y = dx * half_w;
+    nx = norm_x / len;
+    ny = norm_y / len;
+
+    p0_lx = x0 + nx;
+    p0_ly = y0 + ny;
+    p1_lx = x1 + nx;
+    p1_ly = y1 + ny;
+
+    p1_rx = x1 - nx;
+    p1_ry = y1 - ny;
+    p0_rx = x0 - nx;
+    p0_ry = y0 - ny;
+
+    pb_clip_line!(out_tape, out_idx_ptr, p0_lx, p0_ly, p1_lx, p1_ly, rgba);
+    pb_clip_line!(out_tape, out_idx_ptr, p1_lx, p1_ly, p1_rx, p1_ry, rgba);
+    pb_clip_line!(out_tape, out_idx_ptr, p1_rx, p1_ry, p0_rx, p0_ry, rgba);
+    pb_clip_line!(out_tape, out_idx_ptr, p0_rx, p0_ry, p0_lx, p0_ly, rgba);
+    ret 0;
+]
+
+fn pb_path_builder!(cmd_tape, cmd_count, out_tape, out_idx_ptr, mat, rgba) [
+    m00 = mat@[0];
+    m01 = mat@[1];
+    trans_x = mat@[2];
+    m10 = mat@[3];
+    m11 = mat@[4];
+    trans_y = mat@[5];
+
+    px = 0;
+    py = 0;
+    ox = 0;
+    oy = 0;
+
+    loop (ci:10000 = 0 .. cmd_count) [
+        cmd_off = ci * 6;
+        op = cmd_tape@[cmd_off];
+
+        if (op == 1) [
+            rx = cmd_tape@[(cmd_off + 1)];
+            ry = cmd_tape@[(cmd_off + 2)];
+            px = pb_transform_x(rx, ry, m00, m01, trans_x);
+            py = pb_transform_y(rx, ry, m10, m11, trans_y);
+            ox = px;
+            oy = py;
+        ]
+
+        if (op == 2) [
+            rx1 = cmd_tape@[(cmd_off + 1)];
+            ry1 = cmd_tape@[(cmd_off + 2)];
+            nx = pb_transform_x(rx1, ry1, m00, m01, trans_x);
+            ny = pb_transform_y(rx1, ry1, m10, m11, trans_y);
+            pb_clip_line!(out_tape, out_idx_ptr, px, py, nx, ny, rgba);
+            px = nx;
+            py = ny;
+        ]
+
+        if (op == 3) [
+            rcx = cmd_tape@[(cmd_off + 1)];
+            rcy = cmd_tape@[(cmd_off + 2)];
+            rex = cmd_tape@[(cmd_off + 3)];
+            rey = cmd_tape@[(cmd_off + 4)];
+            cx = pb_transform_x(rcx, rcy, m00, m01, trans_x);
+            cy = pb_transform_y(rcx, rcy, m10, m11, trans_y);
+            ex = pb_transform_x(rex, rey, m00, m01, trans_x);
+            ey = pb_transform_y(rex, rey, m10, m11, trans_y);
+            pb_emit_quad!(out_tape, out_idx_ptr, px, py, cx, cy, ex, ey, rgba);
+            px = ex;
+            py = ey;
+        ]
+
+        if (op == 4) [
+            is_open = (px != ox) | (py != oy);
+            if (is_open == 1) [
+                pb_clip_line!(out_tape, out_idx_ptr, px, py, ox, oy, rgba);
+                px = ox;
+                py = oy;
+            ]
+        ]
+    ]
+    ret 0;
+]

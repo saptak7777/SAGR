@@ -1,0 +1,166 @@
+// ==========================================
+// examples/mwe/mwe.sinc
+// SAGR Minimal Working Example (MWE)
+// Renders an anti-aliased vector scene into a Netpbm PPM image
+// ==========================================
+
+const MWE_WIDTH = 64;
+const MWE_HEIGHT = 64;
+const MWE_TILES_X = 4;
+const MWE_TILES_Y = 4;
+const MWE_STRIDE = 256; // 64 pixels * 4 bytes
+
+fn init_ppm_path!(path_buf) [
+    path_buf@[0 * 1] = 115; // 's'
+    path_buf@[1 * 1] = 99;  // 'c'
+    path_buf@[2 * 1] = 114; // 'r'
+    path_buf@[3 * 1] = 97;  // 'a'
+    path_buf@[4 * 1] = 116; // 't'
+    path_buf@[5 * 1] = 99;  // 'c'
+    path_buf@[6 * 1] = 104; // 'h'
+    path_buf@[7 * 1] = 47;  // '/'
+    path_buf@[8 * 1] = 109; // 'm'
+    path_buf@[9 * 1] = 119; // 'w'
+    path_buf@[10 * 1] = 101; // 'e'
+    path_buf@[11 * 1] = 46;  // '.'
+    path_buf@[12 * 1] = 112; // 'p'
+    path_buf@[13 * 1] = 112; // 'p'
+    path_buf@[14 * 1] = 109; // 'm'
+    path_buf@[15 * 1] = 0;
+    ret 0;
+]
+
+fn mwe_add_cord!(tape, count_ptr, x0, y0, x1, y1, rgba) [
+    idx = count_ptr@[0];
+    off = idx * 4;
+
+    tx0 = x0 >> 12;
+    tx1 = x1 >> 12;
+    if (tx0 < 0) [ tx0 = 0; ]
+    if (tx1 > 3) [ tx1 = 3; ]
+    sh_tx = tx0 << 8;
+    tx_span = sh_tx | tx1;
+
+    ty0 = y0 >> 12;
+    ty1 = y1 >> 12;
+    row_mask = 0;
+    if (ty0 < 4) [
+        row_mask = 15;
+    ]
+
+    sh_op = 1 << 56;
+    sh_span = tx_span << 32;
+    mask_rgba = rgba & 4294967295;
+    w0_a = sh_op | sh_span;
+    w0 = w0_a | mask_rgba;
+
+    x0_sh = x0 << 32;
+    y0_lo = y0 & 4294967295;
+    w1 = x0_sh | y0_lo;
+
+    x1_sh = x1 << 32;
+    y1_lo = y1 & 4294967295;
+    w2 = x1_sh | y1_lo;
+
+    tape@[off] = w0;
+    off1 = off + 1;
+    tape@[off1] = w1;
+    off2 = off + 2;
+    tape@[off2] = w2;
+    off3 = off + 3;
+    tape@[off3] = row_mask;
+
+    count_ptr@[0] = idx + 1;
+    ret 0;
+]
+
+fn mwe_dump_ppm!(path_buf, fb_base, width, height, stride, row_scratch) [
+    fd = sys_open_create!(path_buf);
+    if (fd < 0) [
+        ret 0 - 1;
+    ]
+    row_scratch@[0 * 1] = 80;
+    row_scratch@[1 * 1] = 54;
+    row_scratch@[2 * 1] = 10;
+    row_scratch@[3 * 1] = 54;
+    row_scratch@[4 * 1] = 52;
+    row_scratch@[5 * 1] = 32;
+    row_scratch@[6 * 1] = 54;
+    row_scratch@[7 * 1] = 52;
+    row_scratch@[8 * 1] = 10;
+    row_scratch@[9 * 1] = 50;
+    row_scratch@[10 * 1] = 53;
+    row_scratch@[11 * 1] = 53;
+    row_scratch@[12 * 1] = 10;
+    sys_write!(fd, row_scratch, 13);
+    row_bytes = width * 3;
+    loop (y:64 = 0 .. height) [
+        fb_row = fb_base + (y * stride);
+        loop (x:64 = 0 .. width) [
+            px_ptr = fb_row + (x * 4);
+            r = px_ptr@[0 * 1];
+            g = px_ptr@[1 * 1];
+            b = px_ptr@[2 * 1];
+            out_ptr = row_scratch + (x * 3);
+            out_ptr@[0 * 1] = r;
+            out_ptr@[1 * 1] = g;
+            out_ptr@[2 * 1] = b;
+        ]
+        sys_write!(fd, row_scratch, row_bytes);
+    ]
+    sys_close!(fd);
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    arena = arena_init!(536870912, 67108864);
+
+    surface = slsp_create!(arena, MWE_WIDTH, MWE_HEIGHT, 0);
+    fb_ptr = surface.SLSP_WORD_FB_PTR;
+
+    warp_scratch = arena_alloc_words!(arena, LOOM_WARP_SCRATCH_WORDS);
+    cov_scratch = arena_alloc_words!(arena, LOOM_COV_SCRATCH_WORDS);
+    tile_words = arena_alloc_words!(arena, 128);
+    tape = arena_alloc_words!(arena, 256);
+    count_ptr = arena_alloc_words!(arena, 2);
+    row_scratch = arena_alloc_words!(arena, 256);
+    path_buf = arena_alloc_words!(arena, 4);
+
+    count_ptr@[0] = 0;
+    init_ppm_path!(path_buf);
+
+    // Color definitions
+    col_emerald = 4284803990; // #2e7d32
+    col_navy    = 4279505940; // #14141c
+
+    // 1. Draw Emerald Triangle in Tile 1 (x: 18..30, y: 18..30 in Q8.8: x256)
+    // Cord 1: Left downward edge (18, 18) -> (18, 30)
+    x_a = 18 << 8;
+    y_a = 18 << 8;
+    y_b = 30 << 8;
+    mwe_add_cord!(tape, count_ptr, x_a, y_a, x_a, y_b, col_emerald);
+
+    // Cord 2: Diagonal hypotenuse (18, 30) -> (30, 18)
+    x_b = 30 << 8;
+    mwe_add_cord!(tape, count_ptr, x_a, y_b, x_b, y_a, col_emerald);
+
+    // Cord 3: Top horizontal return (30, 18) -> (18, 18)
+    mwe_add_cord!(tape, count_ptr, x_b, y_a, x_a, y_a, col_emerald);
+
+    total_cords = count_ptr@[0];
+
+    // 2. Weave and shade all 4x4 micro-tiles
+    loop (ty:4 = 0 .. MWE_TILES_Y) [
+        loop (tx:4 = 0 .. MWE_TILES_X) [
+            lm_weave_tile!(tape, total_cords, tx, ty, 0, warp_scratch, cov_scratch);
+            lm_shade_tile_rgba!(cov_scratch, col_emerald, col_navy, tile_words);
+            slsp_beam_flush_tile!(fb_ptr, tx, ty, MWE_STRIDE, tile_words~);
+        ]
+    ]
+
+    // 3. Export to PPM file: scratch/mwe.ppm
+    mwe_dump_ppm!(path_buf, fb_ptr, MWE_WIDTH, MWE_HEIGHT, MWE_STRIDE, row_scratch);
+
+    sys_exit!(0);
+]

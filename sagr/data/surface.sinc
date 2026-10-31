@@ -1,0 +1,30 @@
+// ==========================================
+// sagr/data/surface.sinc
+// SLSP Surface Runtime Descriptor Constants
+// ==========================================
+
+const SLSP_WORD_DIMS = 0;
+const SLSP_WORD_STRIDE_FMT = 1;
+const SLSP_WORD_FB_PTR = 2;
+const SLSP_WORD_MASK_PTR = 3;
+const SLSP_DESC_WORDS = 4;
+
+const SLSP_CANVAS_WIDTH = 1920;
+const SLSP_CANVAS_HEIGHT = 1080;
+const SLSP_CANVAS_STRIDE = 7680;
+const SLSP_FORMAT_RGBA8 = 0;
+const SLSP_FORMAT_BGRA8 = 1;
+
+const SLSP_TILES_X = 120;
+const SLSP_TILES_Y = 68;
+const SLSP_TOTAL_TILES = 8160;
+const SLSP_DIRTY_WORDS = 128;
+
+const TILE_DIM = 16;
+const TILE_PIXELS = 256;
+const TILE_BYTES = 1024;
+const TILE_WORDS = 128;
+const TILE_SCANLINE_WORDS = 8;
+
+const LOOM_WARP_SCRATCH_WORDS = 272;
+const LOOM_COV_SCRATCH_WORDS = 256;

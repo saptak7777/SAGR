@@ -1,0 +1,265 @@
+// ==========================================
+// sagr/sys/verify_sagr.sinc
+// Assembly Audit, 12-Scene Golden Oracle & Telemetry Suite
+// ==========================================
+
+const VF_SCENES_COUNT = 12;
+const VF_FNV_OFFSET = -3750763034362895579;
+const VF_FNV_PRIME = 1099511628211;
+
+fn vf_hash_words(words_ptr, count) [
+    h = VF_FNV_OFFSET;
+    i = 0;
+    loop (step:100000 = 0 .. count) [
+        w = words_ptr@[i];
+        xor_val = h ^ w;
+        h = xor_val * VF_FNV_PRIME;
+        i = i + 1;
+    ]
+    ret h;
+]
+
+fn vf_render_scene_1!(tape, tile_words) [
+    // Scene 1: Hairlines (sub-pixel horizontal and vertical cords)
+    // Cord 0: vertical line at x = 0.5px (128), y = 8px..9px (2048..2304)
+    tape@[0] = (1 << 56) | 4278190335;
+    tape@[1] = (128 << 32) | 2048;
+    tape@[2] = (128 << 32) | 2304;
+    tape@[3] = 65535;
+
+    cov_scratch = tape + 2048;
+    warp_scratch = tape + 4096;
+    lm_weave_tile!(tape, 1, 0, 0, 0, warp_scratch, cov_scratch);
+    fg = 4278190335;
+    bg = 0;
+    lm_shade_tile_rgba!(cov_scratch, fg, bg, tile_words);
+    ret 0;
+]
+
+fn vf_render_scene_2!(tape, tile_words) [
+    // Scene 2: Concentric quadratic curve
+    // Chord from (0, 0) to (4096, 4096) with control point (0, 4096)
+    idx_ptr = tile_words + 120;
+    idx_ptr@[0] = 0;
+    fl_flatten_quad!(tape, idx_ptr, 0, 0, 0, 4096, 4096, 4096, 4294901760);
+    cords_count = idx_ptr@[0];
+    cov_scratch = tape + 2048;
+    warp_scratch = tape + 4096;
+    lm_weave_tile!(tape, cords_count, 0, 0, 0, warp_scratch, cov_scratch);
+    fg = 4294901760;
+    bg = 0;
+    lm_shade_tile_rgba!(cov_scratch, fg, bg, tile_words);
+    ret 0;
+]
+
+fn vf_render_scene_3!(tape, tile_words) [
+    // Scene 3: Closed 5-pointed star
+    tape@[0] = (1 << 56) | 4281488112;
+    tape@[1] = (2048 << 32) | 0;
+    tape@[2] = (2560 << 32) | 4096;
+    tape@[3] = 65535;
+
+    tape@[4] = (1 << 56) | 4281488112;
+    tape@[5] = (2560 << 32) | 4096;
+    tape@[6] = (512 << 32) | 1536;
+    tape@[7] = 65535;
+
+    cov_scratch = tape + 2048;
+    warp_scratch = tape + 4096;
+    lm_weave_tile!(tape, 2, 0, 0, 0, warp_scratch, cov_scratch);
+    fg = 4281488112;
+    bg = 0;
+    lm_shade_tile_rgba!(cov_scratch, fg, bg, tile_words);
+    ret 0;
+]
+
+fn vf_render_scene_4!(tile_words) [
+    // Scene 4: 2x2 Affine transform (scale 2x, translate 500)
+    mat = tile_words + 64;
+    mat@[0] = 131072;
+    mat@[1] = 0;
+    mat@[2] = 500;
+    mat@[3] = 0;
+    mat@[4] = 131072;
+    mat@[5] = 500;
+
+    pt_x = pb_transform_x(100, 200, mat@[0], mat@[1], mat@[2]);
+    pt_y = pb_transform_y(100, 200, mat@[3], mat@[4], mat@[5]);
+
+    // Pack into tile_words as signature
+    tile_words@[0] = pt_x;
+    tile_words@[1] = pt_y;
+    ret 0;
+]
+
+fn vf_render_scene_5!(tape, tile_words) [
+    // Scene 5: Monotonic De Casteljau split curve
+    idx_ptr = tile_words + 120;
+    idx_ptr@[0] = 0;
+    pb_emit_quad!(tape, idx_ptr, 0, 4096, 2048, 0, 4096, 4096, 4294901760);
+    leaves_count = idx_ptr@[0];
+    tile_words@[0] = leaves_count;
+    tile_words@[1] = tape@[0];
+    tile_words@[2] = tape@[1];
+    ret 0;
+]
+
+fn vf_render_scene_6!(tile_words) [
+    // Scene 6: Exact Canvas boundary clipper
+    idx_ptr = tile_words + 120;
+    idx_ptr@[0] = 0;
+    pb_clip_line!(tile_words, idx_ptr, 0, 0 - 500, 2000, 1000, 4278190335);
+    ret 0;
+]
+
+fn vf_render_scene_7!(tape, tile_words) [
+    // Scene 7: Multi-tile backdrop tension carry
+    in_bd = tile_words + 256;
+    out_bd = tile_words + 384;
+    hd_backdrop_init!(in_bd);
+    hd_backdrop_init!(out_bd);
+
+    // Set input backdrop tension on row 0
+    in_bd@[0] = 256;
+
+    cov_scratch = tape + 2048;
+    warp_scratch = tape + 4096;
+    lm_weave_tile_backdrop!(tape, 0, 1, 0, 0, in_bd, out_bd, warp_scratch, cov_scratch);
+    fg = 4278190335;
+    bg = 0;
+    lm_shade_tile_rgba!(cov_scratch, fg, bg, tile_words);
+    ret 0;
+]
+
+fn vf_render_scene_8!(tile_words) [
+    // Scene 8: Solid interior fast-fill bypass
+    solid_color = 4294901760; // Blue
+    hd_broadcast_solid!(tile_words, solid_color);
+    ret 0;
+]
+
+fn vf_render_scene_9!(tape, mask_ptr) [
+    // Scene 9: 50-window stacked occlusion shutter
+    loop (i:50 = 0 .. 50) [
+        off = i * 4;
+        tx_lo = 10;
+        tx_hi = 100;
+        ty_lo = 10;
+        ty_hi = 50;
+        eff = 1;
+        if (i == 49) [
+            tx_lo = 0;
+            tx_hi = 119;
+            ty_lo = 0;
+            ty_hi = 63;
+            eff = 2; // Topmost window has EFFECT_SHUTTER
+        ]
+        tx_span = (tx_lo << 8) | tx_hi;
+        eff_sh = eff << 48;
+        span_sh = tx_span << 32;
+        op_sh = 1 << 56;
+        w0_a = op_sh | eff_sh;
+        w0_b = span_sh | 4278190335;
+        w0 = w0_a | w0_b;
+        tape@[off] = w0;
+        off1 = off + 1;
+        tape@[off1] = 0;
+        off2 = off + 2;
+        p2_hi = 491520 << 32;
+        p2_lo = 276480 & 4294967295;
+        tape@[off2] = p2_hi | p2_lo;
+        off3 = off + 3;
+        m3 = fl_make_row_mask(ty_lo, ty_hi);
+        tape@[off3] = m3;
+    ]
+    reaped = hd_reap_shutter!(tape, 50, mask_ptr);
+    mask_ptr@[0] = reaped;
+    ret 0;
+]
+
+fn vf_render_scene_10!(dst_words, src_words) [
+    // Scene 10: 64-lane Source-Over linear compositor
+    w = 0;
+    loop (step:TILE_WORDS = 0 .. TILE_WORDS) [
+        dst_words@[w] = 4294967295; // White
+        src_words@[w] = 2147483776; // 50% Red
+        w = w + 1;
+    ]
+    hd_composite_source_over!(dst_words, src_words);
+    ret 0;
+]
+
+fn vf_render_scene_11!(atlas_buf, tile_words) [
+    // Scene 11: MSDF typography glyph shading
+    w = 0;
+    loop (step:TILE_WORDS = 0 .. TILE_WORDS) [
+        tile_words@[w] = 0;
+        w = w + 1;
+    ]
+    ti = 0;
+    val_b = 200 << 16;
+    val_g = 200 << 8;
+    val_rg = 200 | val_g;
+    val = val_rg | val_b;
+    loop (step:TILE_PIXELS = 0 .. TILE_PIXELS) [
+        atlas_buf@[ti] = val;
+        ti = ti + 1;
+    ]
+    fg = 4278190335; // Red
+    msdf_render_glyph_tile!(atlas_buf, 16, 0, 0, 16, 16, 0, 0, 256, fg, tile_words);
+    ret 0;
+]
+
+fn vf_render_scene_12!(mask_ptr) [
+    // Scene 12: Blinking cursor dirty-tile minimal update (2 tiles dirty, rest clean)
+    zi = 0;
+    loop (step:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
+        mask_ptr@[zi] = 0;
+        zi = zi + 1;
+    ]
+    hd_stamp_tile!(mask_ptr, 10, 20);
+    hd_stamp_tile!(mask_ptr, 10, 21);
+    ret 0;
+]
+
+fn vf_verify_golden_oracle!(tape, mask_ptr, tile_words, out_hashes) [
+    // Run all 12 scenes and compute deterministic 64-bit FNV-1a hash for each scene
+    vf_render_scene_1!(tape, tile_words);
+    out_hashes@[0] = vf_hash_words(tile_words, 128);
+
+    vf_render_scene_2!(tape, tile_words);
+    out_hashes@[1] = vf_hash_words(tile_words, 128);
+
+    vf_render_scene_3!(tape, tile_words);
+    out_hashes@[2] = vf_hash_words(tile_words, 128);
+
+    vf_render_scene_4!(tile_words);
+    out_hashes@[3] = vf_hash_words(tile_words, 64);
+
+    vf_render_scene_5!(tape, tile_words);
+    out_hashes@[4] = vf_hash_words(tile_words, 16);
+
+    vf_render_scene_6!(tile_words);
+    out_hashes@[5] = vf_hash_words(tile_words, 16);
+
+    vf_render_scene_7!(tape, tile_words);
+    out_hashes@[6] = vf_hash_words(tile_words, 128);
+
+    vf_render_scene_8!(tile_words);
+    out_hashes@[7] = vf_hash_words(tile_words, 128);
+
+    vf_render_scene_9!(tape, mask_ptr);
+    out_hashes@[8] = vf_hash_words(tape, 200);
+
+    src_words = tape;
+    vf_render_scene_10!(tile_words, src_words);
+    out_hashes@[9] = vf_hash_words(tile_words, 128);
+
+    atlas_buf = tape;
+    vf_render_scene_11!(atlas_buf, tile_words);
+    out_hashes@[10] = vf_hash_words(tile_words, 128);
+
+    vf_render_scene_12!(mask_ptr);
+    out_hashes@[11] = vf_hash_words(mask_ptr, 128);
+    ret 0;
+]

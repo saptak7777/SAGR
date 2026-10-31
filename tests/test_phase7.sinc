@@ -1,0 +1,219 @@
+// ==========================================
+// tests/test_phase7.sinc
+// SAGR Phase 7 Test Suite: Assembly Audit & 12-Scene Golden Oracle
+// ==========================================
+
+fn test_vf_hash_words!(buf) [
+    buf@[0] = 12345;
+    buf@[1] = 67890;
+    h1 = vf_hash_words(buf, 2);
+    if (h1 == 0) [ ret 1; ]
+    if (h1 == VF_FNV_OFFSET) [ ret 2; ]
+
+    buf@[1] = 67891;
+    h2 = vf_hash_words(buf, 2);
+    if (h2 == h1) [ ret 3; ] // Distinct inputs must yield distinct hashes
+    ret 0;
+]
+
+fn check_golden_hashes!(hashes) [
+    if (hashes@[0] != 1817640690661663005) [ ret 1; ]
+    if (hashes@[1] != -3344515123818599131) [ ret 2; ]
+    if (hashes@[2] != 6152551145473625421) [ ret 3; ]
+    if (hashes@[3] != -2543379141462635431) [ ret 4; ]
+    if (hashes@[4] != 7266194098263789792) [ ret 5; ]
+    if (hashes@[5] != 9179411575584190984) [ ret 6; ]
+    if (hashes@[6] != 384559739574062237) [ ret 7; ]
+    if (hashes@[7] != -4284900774398857947) [ ret 8; ]
+    if (hashes@[8] != -4863058030181509469) [ ret 9; ]
+    if (hashes@[9] != 6693579788332997797) [ ret 10; ]
+    if (hashes@[10] != -3921325195339606363) [ ret 11; ]
+    if (hashes@[11] != -8216200288567235291) [ ret 12; ]
+    ret 0;
+]
+
+fn test_vf_golden_oracle_determinism!(tape, mask_ptr, tile_words, hashes1, hashes2) [
+    // Run 1
+    vf_verify_golden_oracle!(tape, mask_ptr, tile_words, hashes1);
+
+    // Run 2
+    vf_verify_golden_oracle!(tape, mask_ptr, tile_words, hashes2);
+
+    // Verify all 12 scene hashes match bit-for-bit across runs
+    loop (si:12 = 0 .. 12) [
+        h1 = hashes1@[si];
+        h2 = hashes2@[si];
+        if (h1 != h2) [
+            ret 1;
+        ]
+        if (h1 == 0) [
+            ret 2;
+        ]
+    ]
+
+    r_golden = check_golden_hashes!(hashes1);
+    if (r_golden != 0) [
+        ret 10 + r_golden;
+    ]
+    ret 0;
+]
+
+fn test_vf_scene_distinctness!(hashes) [
+    // Verify each of the 12 scenes produces a distinct hash (zero collisions)
+    loop (i:12 = 0 .. 12) [
+        h_i = hashes@[i];
+        next_j = i + 1;
+        if (next_j < 12) [
+            loop (j:12 = next_j .. 12) [
+                h_j = hashes@[j];
+                if (h_i == h_j) [
+                    ret 1;
+                ]
+            ]
+        ]
+    ]
+    ret 0;
+]
+
+fn test_vf_scene1_hairline!(tape, tile_words) [
+    vf_render_scene_1!(tape, tile_words);
+    w64 = tile_words@[64];
+    if (w64 == 0) [ ret 1; ]
+    ret 0;
+]
+
+fn test_vf_scene2_curve!(tape, tile_words) [
+    vf_render_scene_2!(tape, tile_words);
+    w0 = tile_words@[0];
+    if (w0 == 0) [ ret 1; ]
+    ret 0;
+]
+
+fn test_vf_scene3_star!(tape, tile_words) [
+    vf_render_scene_3!(tape, tile_words);
+    non_zero = 0;
+    loop (w:128 = 0 .. 128) [
+        if (tile_words@[w] != 0) [
+            non_zero = non_zero + 1;
+        ]
+    ]
+    if (non_zero == 0) [ ret 1; ]
+    ret 0;
+]
+
+fn test_vf_scene7_backdrop!(tape, tile_words) [
+    vf_render_scene_7!(tape, tile_words);
+    w0 = tile_words@[0];
+    if (w0 == 0) [ ret 1; ]
+    ret 0;
+]
+
+fn test_vf_scene8_solid_folder!(tile_words) [
+    vf_render_scene_8!(tile_words);
+    w0 = tile_words@[0];
+    w127 = tile_words@[127];
+    if (w0 != w127) [ ret 1; ]
+    if (w0 == 0) [ ret 2; ]
+    ret 0;
+]
+
+fn test_vf_scene9_50_windows!(tape, mask_ptr) [
+    vf_render_scene_9!(tape, mask_ptr);
+    reaped = mask_ptr@[0];
+    if (reaped != 49) [ ret 1; ]
+    ret 0;
+]
+
+fn test_vf_scene10_compositor!(tile_words, src_words) [
+    vf_render_scene_10!(tile_words, src_words);
+    w0 = tile_words@[0];
+    p0 = w0 & 4294967295;
+    r0 = p0 & 255;
+    g0 = (p0 >> 8) & 255;
+    b0 = (p0 >> 16) & 255;
+    a0 = (p0 >> 24) & 255;
+    if (r0 != 255) [ ret 1; ]
+    if (g0 != 127) [ ret 2; ]
+    if (b0 != 127) [ ret 3; ]
+    if (a0 != 255) [ ret 4; ]
+    ret 0;
+]
+
+fn test_vf_scene12_cursor_blinking!(mask_ptr) [
+    vf_render_scene_12!(mask_ptr);
+
+    // Verify exactly 2 tiles are marked dirty across the entire 128-word mask
+    dirty_count = 0;
+    loop (w:128 = 0 .. 128) [
+        val = mask_ptr@[w];
+        if (val != 0) [
+            loop (bit_step:64 = 0 .. 64) [
+                if (val != 0) [
+                    dirty_count = dirty_count + 1;
+                    val = blsr64(val);
+                ]
+            ]
+        ]
+    ]
+
+    // Cursor touches exactly 2 dirty tiles! (Minimal update: < 0.05W thermal delta)
+    if (dirty_count != 2) [ ret 1; ]
+    t1 = hd_test_tile(mask_ptr, 10, 20);
+    t2 = hd_test_tile(mask_ptr, 10, 21);
+    t3 = hd_test_tile(mask_ptr, 10, 22);
+    if (t1 != 1) [ ret 2; ]
+    if (t2 != 1) [ ret 3; ]
+    if (t3 != 0) [ ret 4; ]
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+
+    tape = arena_alloc_words!(arena, 1024);
+    mask_ptr = arena_alloc_words!(arena, 128);
+    tile_words = arena_alloc_words!(arena, 128);
+    src_words = arena_alloc_words!(arena, 128);
+    hashes1 = arena_alloc_words!(arena, 16);
+    hashes2 = arena_alloc_words!(arena, 16);
+
+    r1 = test_vf_hash_words!(tile_words);
+    if (r1 != 0) [ sys_exit!(101); ]
+
+    r2 = test_vf_golden_oracle_determinism!(tape, mask_ptr, tile_words, hashes1, hashes2);
+    if (r2 != 0) [ sys_exit!(102); ]
+
+    r3 = test_vf_scene_distinctness!(hashes1);
+    if (r3 != 0) [ sys_exit!(103); ]
+
+    r4 = test_vf_scene1_hairline!(tape, tile_words);
+    if (r4 != 0) [ sys_exit!(104); ]
+
+    r5 = test_vf_scene2_curve!(tape, tile_words);
+    if (r5 != 0) [ sys_exit!(105); ]
+
+    r6 = test_vf_scene3_star!(tape, tile_words);
+    if (r6 != 0) [ sys_exit!(106); ]
+
+    r7 = test_vf_scene7_backdrop!(tape, tile_words);
+    if (r7 != 0) [ sys_exit!(107); ]
+
+    r8 = test_vf_scene8_solid_folder!(tile_words);
+    if (r8 != 0) [ sys_exit!(108); ]
+
+    r9 = test_vf_scene9_50_windows!(tape, mask_ptr);
+    if (r9 != 0) [ sys_exit!(109); ]
+
+    r10 = test_vf_scene10_compositor!(tile_words, src_words);
+    if (r10 != 0) [ sys_exit!(110); ]
+
+    r11 = test_vf_scene12_cursor_blinking!(mask_ptr);
+    if (r11 != 0) [ sys_exit!(111); ]
+
+    sys_exit!(0);
+]

@@ -1,0 +1,477 @@
+// ==========================================
+// tests/test_phase2.sinc
+// SAGR Phase 2 Comprehensive Test Suite
+// ==========================================
+
+fn test_pb_affine_identity!(mat) [
+    mat@[0] = 65536;
+    mat@[1] = 0;
+    mat@[2] = 0;
+    mat@[3] = 0;
+    mat@[4] = 65536;
+    mat@[5] = 0;
+
+    x = 12345;
+    y = 67890;
+    tx = pb_transform_x(x, y, mat@[0], mat@[1], mat@[2]);
+    ty = pb_transform_y(x, y, mat@[3], mat@[4], mat@[5]);
+
+    if (tx != 12345) [
+        ret 1;
+    ]
+    if (ty != 67890) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_pb_affine_scale!(mat) [
+    mat@[0] = 131072;
+    mat@[1] = 0;
+    mat@[2] = 0;
+    mat@[3] = 0;
+    mat@[4] = 196608;
+    mat@[5] = 0;
+
+    x = 1000;
+    y = 2000;
+    tx = pb_transform_x(x, y, mat@[0], mat@[1], mat@[2]);
+    ty = pb_transform_y(x, y, mat@[3], mat@[4], mat@[5]);
+
+    if (tx != 2000) [
+        ret 1;
+    ]
+    if (ty != 6000) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_pb_affine_translate!(mat) [
+    mat@[0] = 65536;
+    mat@[1] = 0;
+    mat@[2] = 5000;
+    mat@[3] = 0;
+    mat@[4] = 65536;
+    mat@[5] = 8000;
+
+    x = 1200;
+    y = 3400;
+    tx = pb_transform_x(x, y, mat@[0], mat@[1], mat@[2]);
+    ty = pb_transform_y(x, y, mat@[3], mat@[4], mat@[5]);
+
+    if (tx != 6200) [
+        ret 1;
+    ]
+    if (ty != 11400) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_pb_affine_rotation!(mat) [
+    mat@[0] = 0;
+    mat@[1] = 65536;
+    mat@[2] = 0;
+    neg_one = 0 - 65536;
+    mat@[3] = neg_one;
+    mat@[4] = 0;
+    mat@[5] = 0;
+
+    x = 1000;
+    y = 2500;
+    tx = pb_transform_x(x, y, mat@[0], mat@[1], mat@[2]);
+    ty = pb_transform_y(x, y, mat@[3], mat@[4], mat@[5]);
+
+    if (tx != 2500) [
+        ret 1;
+    ]
+    if (ty != -1000) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_pb_clamping() [
+    cx_neg = pb_clamp_x(-500);
+    if (cx_neg != 0) [
+        ret 1;
+    ]
+    cx_high = pb_clamp_x(600000);
+    if (cx_high != 491520) [
+        ret 2;
+    ]
+    cx_mid = pb_clamp_x(123456);
+    if (cx_mid != 123456) [
+        ret 3;
+    ]
+
+    cy_neg = pb_clamp_y(-100);
+    if (cy_neg != 0) [
+        ret 4;
+    ]
+    cy_high = pb_clamp_y(350000);
+    if (cy_high != 276480) [
+        ret 5;
+    ]
+    cy_mid = pb_clamp_y(88888);
+    if (cy_mid != 88888) [
+        ret 6;
+    ]
+    ret 0;
+]
+
+fn test_pb_clip_line_inside!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    rgba = 4278190335;
+    pb_clip_line!(tape, idx_ptr, 1000, 2000, 5000, 8000, rgba);
+
+    if (idx_ptr@[0] != 1) [
+        ret 1;
+    ]
+    w0 = tape@[0];
+    w1 = tape@[1];
+    w2 = tape@[2];
+
+    op_tag = w0 >> 56;
+    if (op_tag != 1) [
+        ret 2;
+    ]
+    rgba_tag = w0 & 4294967295;
+    if (rgba_tag != rgba) [
+        ret 3;
+    ]
+
+    x0 = w1 >> 32;
+    y0 = w1 & 4294967295;
+    if (x0 != 1000) [
+        ret 4;
+    ]
+    if (y0 != 2000) [
+        ret 5;
+    ]
+
+    x1 = w2 >> 32;
+    y1 = w2 & 4294967295;
+    if (x1 != 5000) [
+        ret 6;
+    ]
+    if (y1 != 8000) [
+        ret 7;
+    ]
+    ret 0;
+]
+
+fn test_pb_clip_line_oob_discard!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    rgba = 255;
+
+    pb_clip_line!(tape, idx_ptr, 100, -500, 200, -100, rgba);
+    if (idx_ptr@[0] != 0) [
+        ret 1;
+    ]
+
+    pb_clip_line!(tape, idx_ptr, 100, 300000, 200, 400000, rgba);
+    if (idx_ptr@[0] != 0) [
+        ret 2;
+    ]
+
+    pb_clip_line!(tape, idx_ptr, 100, 5000, 500, 5000, rgba);
+    if (idx_ptr@[0] != 0) [
+        ret 3;
+    ]
+    ret 0;
+]
+
+fn test_pb_clip_line_y_crossing!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    rgba = 65280;
+
+    pb_clip_line!(tape, idx_ptr, 0, -100, 100, 100, rgba);
+    if (idx_ptr@[0] != 1) [
+        ret 1;
+    ]
+    w1 = tape@[1];
+    w2 = tape@[2];
+    x0 = w1 >> 32;
+    y0 = w1 & 4294967295;
+    x1 = w2 >> 32;
+    y1 = w2 & 4294967295;
+
+    if (y0 != 0) [
+        ret 2;
+    ]
+    if (x0 != 50) [
+        ret 3;
+    ]
+    if (y1 != 100) [
+        ret 4;
+    ]
+    if (x1 != 100) [
+        ret 5;
+    ]
+    ret 0;
+]
+
+fn test_pb_clip_line_h_crossing!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    rgba = 16711680;
+
+    pb_clip_line!(tape, idx_ptr, 100, 270000, 200, 280000, rgba);
+    if (idx_ptr@[0] != 1) [
+        ret 1;
+    ]
+    w1 = tape@[1];
+    w2 = tape@[2];
+    x0 = w1 >> 32;
+    y0 = w1 & 4294967295;
+    x1 = w2 >> 32;
+    y1 = w2 & 4294967295;
+
+    if (y0 != 270000) [
+        ret 2;
+    ]
+    if (x0 != 100) [
+        ret 3;
+    ]
+    if (y1 != 276480) [
+        ret 4;
+    ]
+    if (x1 != 165) [
+        ret 5;
+    ]
+    ret 0;
+]
+
+fn test_pb_quad_monotonic_no_split!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    rgba = 255;
+    pb_emit_quad!(tape, idx_ptr, 100, 100, 200, 300, 400, 500, rgba);
+
+    if (idx_ptr@[0] != 1) [
+        ret 1;
+    ]
+    w0 = tape@[0];
+    op_tag = w0 >> 56;
+    if (op_tag != 2) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_pb_quad_peak_valley_split!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    rgba = 255;
+    pb_emit_quad!(tape, idx_ptr, 1000, 5000, 1000, 10000, 2000, 1000, rgba);
+
+    if (idx_ptr@[0] != 2) [
+        ret 1;
+    ]
+
+    w1_s0 = tape@[1];
+    w2_s0 = tape@[2];
+    w3_s0 = tape@[3];
+    y0_s0 = w1_s0 & 4294967295;
+    y1_s0 = w2_s0 & 4294967295;
+    y2_s0 = w3_s0 & 4294967295;
+
+    if (y1_s0 < y0_s0) [
+        ret 2;
+    ]
+    if (y2_s0 < y1_s0) [
+        ret 3;
+    ]
+
+    w1_s1 = tape@[5];
+    w2_s1 = tape@[6];
+    w3_s1 = tape@[7];
+    y0_s1 = w1_s1 & 4294967295;
+    y1_s1 = w2_s1 & 4294967295;
+    y2_s1 = w3_s1 & 4294967295;
+
+    if (y1_s1 > y0_s1) [
+        ret 4;
+    ]
+    if (y2_s1 > y1_s1) [
+        ret 5;
+    ]
+
+    idx_ptr@[0] = 0;
+    pb_emit_quad!(tape, idx_ptr, 1000, 8000, 1000, 2000, 2000, 9000, rgba);
+    if (idx_ptr@[0] != 2) [
+        ret 6;
+    ]
+    ret 0;
+]
+
+fn test_pb_stroke_expansion!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    rgba = 4294967295;
+
+    pb_stroke_line!(tape, idx_ptr, 10000, 20000, 50000, 20000, 256, rgba);
+
+    if (idx_ptr@[0] != 2) [
+        ret 1;
+    ]
+
+    w1_cap0 = tape@[1];
+    w2_cap0 = tape@[2];
+    x0_c0 = w1_cap0 >> 32;
+    x1_c0 = w2_cap0 >> 32;
+    if (x0_c0 != 50000) [
+        ret 2;
+    ]
+    if (x1_c0 != 50000) [
+        ret 3;
+    ]
+
+    w1_cap1 = tape@[5];
+    w2_cap1 = tape@[6];
+    x0_c1 = w1_cap1 >> 32;
+    x1_c1 = w2_cap1 >> 32;
+    if (x0_c1 != 10000) [
+        ret 4;
+    ]
+    if (x1_c1 != 10000) [
+        ret 5;
+    ]
+    ret 0;
+]
+
+fn test_pb_path_builder_full!(cmd_tape, out_tape, idx_ptr, mat) [
+    idx_ptr@[0] = 0;
+
+    cmd_tape@[0] = 1;
+    cmd_tape@[1] = 1000;
+    cmd_tape@[2] = 1000;
+    cmd_tape@[3] = 0;
+    cmd_tape@[4] = 0;
+    cmd_tape@[5] = 0;
+
+    cmd_tape@[6] = 2;
+    cmd_tape@[7] = 5000;
+    cmd_tape@[8] = 10000;
+    cmd_tape@[9] = 0;
+    cmd_tape@[10] = 0;
+    cmd_tape@[11] = 0;
+
+    cmd_tape@[12] = 2;
+    cmd_tape@[13] = 2000;
+    cmd_tape@[14] = 8000;
+    cmd_tape@[15] = 0;
+    cmd_tape@[16] = 0;
+    cmd_tape@[17] = 0;
+
+    cmd_tape@[18] = 4;
+    cmd_tape@[19] = 0;
+    cmd_tape@[20] = 0;
+    cmd_tape@[21] = 0;
+    cmd_tape@[22] = 0;
+    cmd_tape@[23] = 0;
+
+    mat@[0] = 65536;
+    mat@[1] = 0;
+    mat@[2] = 0;
+    mat@[3] = 0;
+    mat@[4] = 65536;
+    mat@[5] = 0;
+
+    rgba = 4278190335;
+    pb_path_builder!(cmd_tape, 4, out_tape, idx_ptr, mat, rgba);
+
+    if (idx_ptr@[0] != 3) [
+        ret 1;
+    ]
+
+    w2_last = out_tape@[10];
+    x_end = w2_last >> 32;
+    y_end = w2_last & 4294967295;
+    if (x_end != 1000) [
+        ret 2;
+    ]
+    if (y_end != 1000) [
+        ret 3;
+    ]
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+
+    out_tape = arena_alloc_words!(arena, 256);
+    idx_ptr = arena_alloc_words!(arena, 2);
+    cmd_tape = arena_alloc_words!(arena, 64);
+    mat = arena_alloc_words!(arena, 6);
+
+    r1 = test_pb_affine_identity!(mat);
+    if (r1 != 0) [
+        sys_exit!(101);
+    ]
+
+    r2 = test_pb_affine_scale!(mat);
+    if (r2 != 0) [
+        sys_exit!(102);
+    ]
+
+    r3 = test_pb_affine_translate!(mat);
+    if (r3 != 0) [
+        sys_exit!(103);
+    ]
+
+    r4 = test_pb_affine_rotation!(mat);
+    if (r4 != 0) [
+        sys_exit!(104);
+    ]
+
+    r5 = test_pb_clamping();
+    if (r5 != 0) [
+        sys_exit!(105);
+    ]
+
+    r6 = test_pb_clip_line_inside!(out_tape, idx_ptr);
+    if (r6 != 0) [
+        sys_exit!(106);
+    ]
+
+    r7 = test_pb_clip_line_oob_discard!(out_tape, idx_ptr);
+    if (r7 != 0) [
+        sys_exit!(107);
+    ]
+
+    r8 = test_pb_clip_line_y_crossing!(out_tape, idx_ptr);
+    if (r8 != 0) [
+        sys_exit!(108);
+    ]
+
+    r9 = test_pb_clip_line_h_crossing!(out_tape, idx_ptr);
+    if (r9 != 0) [
+        sys_exit!(109);
+    ]
+
+    r10 = test_pb_quad_monotonic_no_split!(out_tape, idx_ptr);
+    if (r10 != 0) [
+        sys_exit!(110);
+    ]
+
+    r11 = test_pb_quad_peak_valley_split!(out_tape, idx_ptr);
+    if (r11 != 0) [
+        sys_exit!(111);
+    ]
+
+    r12 = test_pb_stroke_expansion!(out_tape, idx_ptr);
+    if (r12 != 0) [
+        sys_exit!(112);
+    ]
+
+    r13 = test_pb_path_builder_full!(cmd_tape, out_tape, idx_ptr, mat);
+    if (r13 != 0) [
+        sys_exit!(113);
+    ]
+
+    sys_exit!(0);
+]

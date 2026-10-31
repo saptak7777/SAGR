@@ -1,0 +1,429 @@
+// ==========================================
+// sagr/pure/msdf.sinc
+// Bare-Metal Atlas Loader, UTF-8 Layout & Integer MSDF Engine
+// ==========================================
+
+const SFONT_MAGIC = 1414418259; // 'SFNT'
+const SFONT_HEADER_WORDS = 8;
+const SFONT_GLYPH_WORDS = 4;
+
+const SFONT_WORD_MAGIC = 0;
+const SFONT_WORD_DIMS = 1;
+const SFONT_WORD_METRICS = 2;
+const SFONT_WORD_GLYPH_COUNT = 3;
+const SFONT_WORD_ATLAS_OFFSET = 4;
+
+fn msdf_sfont_init!(header_ptr, atlas_w, atlas_h, ascent_q8, descent_q8, glyph_count, atlas_offset) [
+    header_ptr@[0] = SFONT_MAGIC;
+    w_sh = atlas_w << 16;
+    w_dims = w_sh | atlas_h;
+    header_ptr@[1] = w_dims;
+    m_sh = ascent_q8 << 16;
+    w_metrics = m_sh | descent_q8;
+    header_ptr@[2] = w_metrics;
+    header_ptr@[3] = glyph_count;
+    header_ptr@[4] = atlas_offset;
+    header_ptr@[5] = 0;
+    header_ptr@[6] = 0;
+    header_ptr@[7] = 0;
+    ret 0;
+]
+
+fn msdf_sfont_add_glyph!(glyphs_base, idx, unicode, advance_q8, u0, v0, u1, v1, pl_x0, pl_y0, pl_x1, pl_y1) [
+    off = idx * 4;
+
+    // Word 0: [unicode : 32 bits, advance_q8 : 32 bits]
+    uni_sh = unicode << 32;
+    adv_lo = advance_q8 & 4294967295;
+    w0 = uni_sh | adv_lo;
+    glyphs_base@[off] = w0;
+
+    // Word 1: Atlas UV Rect [u0:16, v0:16, u1:16, v1:16]
+    u0_sh = u0 << 48;
+    v0_sh = v0 << 32;
+    u1_sh = u1 << 16;
+    v1_lo = v1 & 65535;
+    w1_a = u0_sh | v0_sh;
+    w1_b = u1_sh | v1_lo;
+    w1 = w1_a | w1_b;
+    off1 = off + 1;
+    glyphs_base@[off1] = w1;
+
+    // Word 2: Plane Bounds [pl_x0:16, pl_y0:16, pl_x1:16, pl_y1:16]
+    px0_mask = pl_x0 & 65535;
+    x0_sh = px0_mask << 48;
+    py0_mask = pl_y0 & 65535;
+    y0_sh = py0_mask << 32;
+    px1_mask = pl_x1 & 65535;
+    x1_sh = px1_mask << 16;
+    y1_lo = pl_y1 & 65535;
+    w2_a = x0_sh | y0_sh;
+    w2_b = x1_sh | y1_lo;
+    w2 = w2_a | w2_b;
+    off2 = off + 2;
+    glyphs_base@[off2] = w2;
+
+    off3 = off + 3;
+    glyphs_base@[off3] = 0;
+    ret 0;
+]
+
+fn msdf_find_glyph(glyphs_base, glyph_count, codepoint) [
+    loop (gi:256 = 0 .. glyph_count) [
+        off = gi * 4;
+        w0 = glyphs_base@[off];
+        uni = w0 >> 32;
+        if (uni == codepoint) [
+            ret gi;
+        ]
+    ]
+    ret 0 - 1;
+]
+
+fn msdf_decode_utf8(text_ptr, byte_offset) [
+    word_idx = byte_offset >> 3;
+    byte_in_word = byte_offset & 7;
+    sh = byte_in_word * 8;
+    w = text_ptr@[word_idx];
+    w_sh = w >> sh;
+    b0 = w_sh & 255;
+
+    // 1-byte ASCII (0..127)
+    if (b0 < 128) [
+        sh_len1 = 1 << 32;
+        res1 = sh_len1 | b0;
+        ret res1;
+    ]
+
+    // 2-byte sequence (110xxxxx 10xxxxxx)
+    if (b0 < 224) [
+        off1 = byte_offset + 1;
+        w_idx1 = off1 >> 3;
+        b_in_w1 = off1 & 7;
+        sh1 = b_in_w1 * 8;
+        w1 = text_ptr@[w_idx1];
+        w1_sh = w1 >> sh1;
+        b1 = w1_sh & 255;
+        b0_clean = b0 & 31;
+        cp0 = b0_clean << 6;
+        cp1 = b1 & 63;
+        cp_val2 = cp0 | cp1;
+        sh_len2 = 2 << 32;
+        res2 = sh_len2 | cp_val2;
+        ret res2;
+    ]
+
+    // 3-byte sequence (1110xxxx 10xxxxxx 10xxxxxx)
+    if (b0 < 240) [
+        off1 = byte_offset + 1;
+        w_idx1 = off1 >> 3;
+        b_in_w1 = off1 & 7;
+        sh1 = b_in_w1 * 8;
+        w1 = text_ptr@[w_idx1];
+        w1_sh = w1 >> sh1;
+        b1 = w1_sh & 255;
+
+        off2 = byte_offset + 2;
+        w_idx2 = off2 >> 3;
+        b_in_w2 = off2 & 7;
+        sh2 = b_in_w2 * 8;
+        w2 = text_ptr@[w_idx2];
+        w2_sh = w2 >> sh2;
+        b2 = w2_sh & 255;
+
+        b0_clean = b0 & 15;
+        cp0 = b0_clean << 12;
+        b1_clean = b1 & 63;
+        cp1 = b1_clean << 6;
+        cp2 = b2 & 63;
+        sum_cp = cp0 | cp1;
+        cp_val3 = sum_cp | cp2;
+        sh_len3 = 3 << 32;
+        res3 = sh_len3 | cp_val3;
+        ret res3;
+    ]
+
+    // 4-byte sequence (11110xxx 10xxxxxx 10xxxxxx 10xxxxxx)
+    off1 = byte_offset + 1;
+    w_idx1 = off1 >> 3;
+    b_in_w1 = off1 & 7;
+    sh1 = b_in_w1 * 8;
+    w1 = text_ptr@[w_idx1];
+    w1_sh = w1 >> sh1;
+    b1 = w1_sh & 255;
+
+    off2 = byte_offset + 2;
+    w_idx2 = off2 >> 3;
+    b_in_w2 = off2 & 7;
+    sh2 = b_in_w2 * 8;
+    w2 = text_ptr@[w_idx2];
+    w2_sh = w2 >> sh2;
+    b2 = w2_sh & 255;
+
+    off3 = byte_offset + 3;
+    w_idx3 = off3 >> 3;
+    b_in_w3 = off3 & 7;
+    sh3 = b_in_w3 * 8;
+    w3 = text_ptr@[w_idx3];
+    w3_sh = w3 >> sh3;
+    b3 = w3_sh & 255;
+
+    b0_clean = b0 & 7;
+    cp0 = b0_clean << 18;
+    b1_clean = b1 & 63;
+    cp1 = b1_clean << 12;
+    b2_clean = b2 & 63;
+    cp2 = b2_clean << 6;
+    cp3 = b3 & 63;
+    s01 = cp0 | cp1;
+    s23 = cp2 | cp3;
+    cp_val4 = s01 | s23;
+    sh_len4 = 4 << 32;
+    res4 = sh_len4 | cp_val4;
+    ret res4;
+]
+
+fn msdf_median(r, g, b) [
+    min_rg = r;
+    if (g < r) [
+        min_rg = g;
+    ]
+    max_rg = r;
+    if (g > r) [
+        max_rg = g;
+    ]
+    min_max_b = max_rg;
+    if (b < max_rg) [
+        min_max_b = b;
+    ]
+    med = min_rg;
+    if (min_max_b > min_rg) [
+        med = min_max_b;
+    ]
+    ret med;
+]
+
+fn msdf_sample_texel(atlas_ptr, atlas_w, tx, ty) [
+    idx = ty * atlas_w;
+    full_idx = idx + tx;
+    texel = atlas_ptr@[full_idx];
+    ret texel;
+]
+
+fn msdf_bilinear_sample(atlas_ptr, atlas_w, u_q16, v_q16) [
+    u0 = u_q16 >> 16;
+    v0 = v_q16 >> 16;
+    u1 = u0 + 1;
+    v1 = v0 + 1;
+
+    sh_u = u_q16 >> 8;
+    fu = sh_u & 255;
+    sh_v = v_q16 >> 8;
+    fv = sh_v & 255;
+
+    inv_u = 256 - fu;
+    inv_v = 256 - fv;
+
+    w00_prod = inv_u * inv_v;
+    w00 = w00_prod >> 8;
+    w10_prod = fu * inv_v;
+    w10 = w10_prod >> 8;
+    w01_prod = inv_u * fv;
+    w01 = w01_prod >> 8;
+    w11_prod = fu * fv;
+    w11 = w11_prod >> 8;
+
+    t00 = msdf_sample_texel(atlas_ptr, atlas_w, u0, v0);
+    t10 = msdf_sample_texel(atlas_ptr, atlas_w, u1, v0);
+    t01 = msdf_sample_texel(atlas_ptr, atlas_w, u0, v1);
+    t11 = msdf_sample_texel(atlas_ptr, atlas_w, u1, v1);
+
+    // Channel Red
+    r00 = t00 & 255;
+    r10 = t10 & 255;
+    r01 = t01 & 255;
+    r11 = t11 & 255;
+    r00_t = r00 * w00;
+    r10_t = r10 * w10;
+    r01_t = r01 * w01;
+    r11_t = r11 * w11;
+    r_a = r00_t + r10_t;
+    r_b = r01_t + r11_t;
+    r_sum = r_a + r_b;
+    r_out = r_sum >> 8;
+
+    // Channel Green
+    t00_g = t00 >> 8;
+    g00 = t00_g & 255;
+    t10_g = t10 >> 8;
+    g10 = t10_g & 255;
+    t01_g = t01 >> 8;
+    g01 = t01_g & 255;
+    t11_g = t11 >> 8;
+    g11 = t11_g & 255;
+    g00_t = g00 * w00;
+    g10_t = g10 * w10;
+    g01_t = g01 * w01;
+    g11_t = g11 * w11;
+    g_a = g00_t + g10_t;
+    g_b = g01_t + g11_t;
+    g_sum = g_a + g_b;
+    g_out = g_sum >> 8;
+
+    // Channel Blue
+    t00_b = t00 >> 16;
+    b00 = t00_b & 255;
+    t10_b = t10 >> 16;
+    b10 = t10_b & 255;
+    t01_b = t01 >> 16;
+    b01 = t01_b & 255;
+    t11_b = t11 >> 16;
+    b11 = t11_b & 255;
+    b00_t = b00 * w00;
+    b10_t = b10 * w10;
+    b01_t = b01 * w01;
+    b11_t = b11 * w11;
+    b_a = b00_t + b10_t;
+    b_b = b01_t + b11_t;
+    b_sum = b_a + b_b;
+    b_out = b_sum >> 8;
+
+    g_sh = g_out << 8;
+    b_sh = b_out << 16;
+    rg = r_out | g_sh;
+    rgb = rg | b_sh;
+    ret rgb;
+]
+
+fn msdf_eval_alpha(med_dist, screen_scale_q8) [
+    delta_d = med_dist - 128;
+    prod = delta_d * screen_scale_q8;
+    sh_prod = prod >> 8;
+    raw_alpha = 128 + sh_prod;
+
+    if (raw_alpha < 0) [
+        ret 0;
+    ]
+    if (raw_alpha > 255) [
+        ret 255;
+    ]
+    ret raw_alpha;
+]
+
+fn msdf_eval_pixel(atlas_ptr, atlas_w, glyph_u0, glyph_v0, c, r, screen_scale_q8, fg_a, fg_r, fg_g, fg_b) [
+    gu_sh = glyph_u0 << 16;
+    c_sh = c << 16;
+    u_px = gu_sh + c_sh;
+    gv_sh = glyph_v0 << 16;
+    r_sh = r << 16;
+    v_px = gv_sh + r_sh;
+    rgb = msdf_bilinear_sample(atlas_ptr, atlas_w, u_px, v_px);
+    r_val = rgb & 255;
+    rgb_g = rgb >> 8;
+    g_val = rgb_g & 255;
+    rgb_b = rgb >> 16;
+    b_val = rgb_b & 255;
+    med = msdf_median(r_val, g_val, b_val);
+    cov = msdf_eval_alpha(med, screen_scale_q8);
+
+    pa = fg_a * cov;
+    a = pa >> 8;
+    pr = fg_r * cov;
+    cr = pr >> 8;
+    pg = fg_g * cov;
+    cg = pg >> 8;
+    pb = fg_b * cov;
+    cb = pb >> 8;
+    cg_sh = cg << 8;
+    cb_sh = cb << 16;
+    a_sh = a << 24;
+    rg = cr | cg_sh;
+    ba = cb_sh | a_sh;
+    p = rg | ba;
+    ret p;
+]
+
+fn msdf_render_glyph_tile!(atlas_ptr, atlas_w, glyph_u0, glyph_v0, glyph_w, glyph_h, tile_tx, tile_ty, screen_scale_q8, fg_rgba, tile_words) [
+    fg_r = fg_rgba & 255;
+    fg_g_sh = fg_rgba >> 8;
+    fg_g = fg_g_sh & 255;
+    fg_b_sh = fg_rgba >> 16;
+    fg_b = fg_b_sh & 255;
+    fg_a_sh = fg_rgba >> 24;
+    fg_a = fg_a_sh & 255;
+
+    r = 0;
+    loop (step_r:TILE_DIM = 0 .. TILE_DIM) [
+        row_w = r * 8;
+        p = 0;
+        loop (step_p:TILE_SCANLINE_WORDS = 0 .. TILE_SCANLINE_WORDS) [
+            c0 = p * 2;
+            c1 = c0 + 1;
+            src_p0 = msdf_eval_pixel(atlas_ptr, atlas_w, glyph_u0, glyph_v0, c0, r, screen_scale_q8, fg_a, fg_r, fg_g, fg_b);
+            src_p1 = msdf_eval_pixel(atlas_ptr, atlas_w, glyph_u0, glyph_v0, c1, r, screen_scale_q8, fg_a, fg_r, fg_g, fg_b);
+
+            w_idx = row_w + p;
+            dst_word = tile_words@[w_idx];
+            dst_p0 = dst_word & 4294967295;
+            dst_p1_sh = dst_word >> 32;
+            dst_p1 = dst_p1_sh & 4294967295;
+
+            out_p0 = hd_blend_pixel(src_p0, dst_p0);
+            out_p1 = hd_blend_pixel(src_p1, dst_p1);
+
+            hi_w = out_p1 << 32;
+            lo_w = out_p0 & 4294967295;
+            tile_words@[w_idx] = hi_w | lo_w;
+            p = p + 1;
+        ]
+        r = r + 1;
+    ]
+    ret 0;
+]
+
+fn msdf_layout_line!(glyphs_base, glyph_count, text_ptr, text_bytes, start_x_q8, start_y_q8, scale_q8, out_positions, max_glyphs) [
+    cursor_x = start_x_q8;
+    cursor_y = start_y_q8;
+    byte_off = 0;
+    glyph_out = 0;
+    len_slot = 0;
+    tb_limit = text_bytes - 1;
+    mg_limit = max_glyphs - 1;
+
+    loop (step:4096 = 0 .. text_bytes) [
+        if (byte_off > tb_limit) [
+            ret glyph_out;
+        ]
+        if (glyph_out > mg_limit) [
+            ret glyph_out;
+        ]
+
+        dec = msdf_decode_utf8(text_ptr, byte_off);
+        c_len = dec >> 32;
+        cp = dec & 4294967295;
+        byte_off = byte_off + c_len;
+
+        g_idx = msdf_find_glyph(glyphs_base, glyph_count, cp);
+        if (g_idx > 0 - 1) [
+            g_off = g_idx * 4;
+            w0 = glyphs_base@[g_off];
+            adv = w0 & 4294967295;
+
+            // Store glyph record: [g_idx, cursor_x, cursor_y, scaled_adv]
+            rec_off = glyph_out * 4;
+            out_positions@[rec_off] = g_idx;
+            off_x = rec_off + 1;
+            out_positions@[off_x] = cursor_x;
+            off_y = rec_off + 2;
+            out_positions@[off_y] = cursor_y;
+            p_adv = adv * scale_q8;
+            scaled_adv = p_adv >> 8;
+            off_adv = rec_off + 3;
+            out_positions@[off_adv] = scaled_adv;
+
+            cursor_x = cursor_x + scaled_adv;
+            glyph_out = glyph_out + 1;
+        ]
+    ]
+    ret glyph_out;
+]

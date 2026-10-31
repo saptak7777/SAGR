@@ -1,0 +1,443 @@
+// ==========================================
+// tests/test_phase5.sinc
+// SAGR Phase 5 Comprehensive Test Suite: The Heddle & Compositor
+// ==========================================
+
+fn test_hd_shutter_bitops!(mask_ptr) [
+    loop (zi:128 = 0 .. 128) [
+        mask_ptr@[zi] = 0;
+    ]
+
+    hd_stamp_tile!(mask_ptr, 10, 20);
+
+    if (hd_test_tile(mask_ptr, 10, 20) != 1) [ ret 1; ]
+    if (hd_test_tile(mask_ptr, 9, 20) != 0) [ ret 2; ]
+    if (hd_test_tile(mask_ptr, 11, 20) != 0) [ ret 3; ]
+    if (hd_test_tile(mask_ptr, 10, 19) != 0) [ ret 4; ]
+    if (hd_test_tile(mask_ptr, 10, 21) != 0) [ ret 5; ]
+
+    // Out of bounds safety
+    if (hd_test_tile(mask_ptr, 0 - 1, 0) != 0) [ ret 6; ]
+    if (hd_test_tile(mask_ptr, 120, 0) != 0) [ ret 7; ]
+    if (hd_test_tile(mask_ptr, 0, 68) != 0) [ ret 8; ]
+    ret 0;
+]
+
+fn test_hd_shutter_interior!(mask_ptr) [
+    loop (zi:128 = 0 .. 128) [
+        mask_ptr@[zi] = 0;
+    ]
+
+    // Window from tx: 5..15, ty: 10..20
+    hd_stamp_shutter_interior!(mask_ptr, 5, 10, 15, 20);
+
+    // Border tiles must NOT be occluded (to preserve rounded corners & AA edges)
+    if (hd_test_tile(mask_ptr, 5, 10) != 0) [ ret 1; ]
+    if (hd_test_tile(mask_ptr, 15, 20) != 0) [ ret 2; ]
+    if (hd_test_tile(mask_ptr, 5, 15) != 0) [ ret 3; ]
+    if (hd_test_tile(mask_ptr, 15, 15) != 0) [ ret 4; ]
+
+    // Interior tiles must BE occluded
+    if (hd_test_tile(mask_ptr, 6, 11) != 1) [ ret 5; ]
+    if (hd_test_tile(mask_ptr, 14, 19) != 1) [ ret 6; ]
+    if (hd_test_tile(mask_ptr, 10, 15) != 1) [ ret 7; ]
+    ret 0;
+]
+
+fn test_hd_occlusion_query!(mask_ptr) [
+    loop (zi:128 = 0 .. 128) [
+        mask_ptr@[zi] = 0;
+    ]
+    hd_stamp_shutter_interior!(mask_ptr, 5, 10, 15, 20);
+
+    // Completely inside interior [6..14, 11..19] -> occluded
+    if (hd_is_occluded(mask_ptr, 7, 12, 13, 18) != 1) [ ret 1; ]
+
+    // Touching outer border -> NOT occluded
+    if (hd_is_occluded(mask_ptr, 5, 12, 13, 18) != 0) [ ret 2; ]
+    if (hd_is_occluded(mask_ptr, 7, 10, 13, 18) != 0) [ ret 3; ]
+    if (hd_is_occluded(mask_ptr, 7, 12, 15, 18) != 0) [ ret 4; ]
+    if (hd_is_occluded(mask_ptr, 7, 12, 13, 20) != 0) [ ret 5; ]
+    ret 0;
+]
+
+fn test_hd_reaper!(tape, mask_ptr) [
+    // Command 0: Background rect completely inside window (tx: 8..12, ty: 12..16)
+    w0_span0 = (8 << 8) | 12;
+    w0_0 = (1 << 56) | (w0_span0 << 32) | 4278190335;
+    w3_0 = fl_make_row_mask(12, 16);
+    tape@[0] = w0_0;
+    tape@[1] = (32768 << 32) | 49152;
+    tape@[2] = (49152 << 32) | 65536;
+    tape@[3] = w3_0;
+
+    // Command 1: Background rect outside window (tx: 2..4, ty: 2..4)
+    w0_span1 = (2 << 8) | 4;
+    w0_1 = (1 << 56) | (w0_span1 << 32) | 4278190335;
+    w3_1 = fl_make_row_mask(2, 4);
+    tape@[4] = w0_1;
+    tape@[5] = (8192 << 32) | 8192;
+    tape@[6] = (16384 << 32) | 16384;
+    tape@[7] = w3_1;
+
+    // Command 2: Foreground opaque window (tx: 5..15, ty: 10..20) with EFFECT_SHUTTER
+    w0_span2 = (5 << 8) | 15;
+    w0_eff2 = 2 << 48; // EFFECT_SHUTTER
+    w0_2 = (1 << 56) | w0_eff2 | (w0_span2 << 32) | 4278190335;
+    w3_2 = fl_make_row_mask(10, 20);
+    tape@[8] = w0_2;
+    tape@[9] = (20480 << 32) | 40960;
+    tape@[10] = (61440 << 32) | 81920;
+    tape@[11] = w3_2;
+
+    reaped = hd_reap_shutter!(tape, 3, mask_ptr);
+
+    if (reaped != 1) [ ret 1; ]
+
+    // Command 0 must be mutated to NOP (0, 0, 0, 0)
+    if (tape@[0] != 0) [ ret 2; ]
+    if (tape@[1] != 0) [ ret 3; ]
+    if (tape@[2] != 0) [ ret 4; ]
+    if (tape@[3] != 0) [ ret 5; ]
+
+    // Command 1 must remain intact
+    if (tape@[4] != w0_1) [ ret 6; ]
+
+    // Command 2 must remain intact
+    if (tape@[8] != w0_2) [ ret 7; ]
+    ret 0;
+]
+
+fn test_hd_solid_interior_folder!(backdrop_buf, tile_words) [
+    hd_backdrop_init!(backdrop_buf);
+
+    // Case 1: Incomplete backdrop (< 256) -> not solid interior
+    backdrop_buf@[0] = 128;
+    if (hd_is_solid_interior(0, backdrop_buf) != 0) [ ret 1; ]
+
+    // Case 2: Active cords exist -> not solid interior
+    loop (r:16 = 0 .. 16) [
+        backdrop_buf@[r] = 256;
+    ]
+    if (hd_is_solid_interior(1, backdrop_buf) != 0) [ ret 2; ]
+
+    // Case 3: 0 cords and all 16 rows carry 256 -> solid interior!
+    if (hd_is_solid_interior(0, backdrop_buf) != 1) [ ret 3; ]
+
+    // Case 4: Fast broadcast
+    solid_color = 4281488112; // Crimson
+    hd_broadcast_solid!(tile_words, solid_color);
+    w0 = tile_words@[0];
+    w127 = tile_words@[127];
+    px_lo = w0 & 4294967295;
+    px_hi_sh = w0 >> 32;
+    px_hi = px_hi_sh & 4294967295;
+    if (px_lo != solid_color) [ ret 4; ]
+    if (px_hi != solid_color) [ ret 5; ]
+    if (w127 != w0) [ ret 6; ]
+    ret 0;
+]
+
+fn test_hd_backdrop_carry_multitile!(tape, in_bd, out_bd, scratch, cov) [
+    hd_backdrop_init!(in_bd);
+    hd_backdrop_init!(out_bd);
+    rgba = 4278190335;
+    row_mask = 65535;
+
+    // Weave horizontal span across 3 tiles: Tx = 0, Tx = 1, Tx = 2
+    // Shape enters at Tile 0, col 0 (x=0) and exits at Tile 2, col 15 (x=4096-256)
+
+    // --- TILE 0: Enter Edge (downward cord at x = 0, Tile 0) ---
+    span0 = (0 << 8) | 0;
+    tape@[0] = (1 << 56) | (span0 << 32) | rgba;
+    tape@[1] = (0 << 32) | 0;
+    tape@[2] = (0 << 32) | 4096;
+    tape@[3] = row_mask;
+
+    lm_weave_tile_backdrop!(tape, 1, 0, 0, 0, in_bd, out_bd, scratch, cov);
+
+    // Verify exit tension out_bd[r] == 256 for all 16 rows
+    loop (r0:16 = 0 .. 16) [
+        if (out_bd@[r0] != 256) [
+            ret 1;
+        ]
+    ]
+
+    // --- TILE 1: Solid Interior (0 cords, carries in_bd = out_bd = 256) ---
+    loop (tr:16 = 0 .. 16) [
+        in_bd@[tr] = out_bd@[tr];
+    ]
+
+    lm_weave_tile_backdrop!(tape, 0, 1, 0, 0, in_bd, out_bd, scratch, cov);
+
+    // Verify all 256 pixels have 100% coverage (256)
+    loop (p1:256 = 0 .. 256) [
+        if (cov@[p1] != 256) [
+            ret 2;
+        ]
+    ]
+    // Verify exit tension remains 256
+    loop (r1:16 = 0 .. 16) [
+        if (out_bd@[r1] != 256) [
+            ret 3;
+        ]
+    ]
+
+    // --- TILE 2: Exit Edge (upward cord at Tile 2, col 8: x = 2048) ---
+    loop (tr2:16 = 0 .. 16) [
+        in_bd@[tr2] = out_bd@[tr2];
+    ]
+    base_x2 = 2 << 12; // 8192
+    span2 = (2 << 8) | 2;
+    tape@[0] = (1 << 56) | (span2 << 32) | rgba;
+    tape@[1] = ((base_x2 + 2048) << 32) | 4096;
+    tape@[2] = ((base_x2 + 2048) << 32) | 0;
+    tape@[3] = row_mask;
+
+    lm_weave_tile_backdrop!(tape, 1, 2, 0, 0, in_bd, out_bd, scratch, cov);
+
+    // Col 0..7 must have coverage 256
+    cov_pre = cov@[0];
+    if (cov_pre != 256) [ ret 4; ]
+    // Col 8..15 must drop to 0
+    cov_post = cov@[15];
+    if (cov_post != 0) [ ret 5; ]
+
+    // Exit tension must now be 0!
+    loop (r2:16 = 0 .. 16) [
+        if (out_bd@[r2] != 0) [
+            ret 6;
+        ]
+    ]
+    ret 0;
+]
+
+fn test_hd_compositor_zero_alpha!(dst_words, src_words) [
+    // Dst has blue color: (0, 0, 255, 255) -> 4294901760
+    color_dst = 4294901760;
+    hi = color_dst << 32;
+    lo = color_dst & 4294967295;
+    w_dst = hi | lo;
+    idx = 0;
+    loop (step:128 = 0 .. 128) [
+        dst_words@[idx] = w_dst;
+        src_words@[idx] = 0;
+        idx = idx + 1;
+    ]
+
+    hd_composite_source_over!(dst_words, src_words);
+
+    // Dst must remain completely untouched
+    if (dst_words@[0] != w_dst) [ ret 1; ]
+    if (dst_words@[127] != w_dst) [ ret 2; ]
+    ret 0;
+]
+
+fn test_hd_compositor_full_alpha!(dst_words, src_words) [
+    color_dst = 4294901760; // Blue
+    color_src = 4278190335; // Red (255, 0, 0, 255)
+    hi_d = color_dst << 32;
+    lo_d = color_dst & 4294967295;
+    w_dst = hi_d | lo_d;
+    hi_s = color_src << 32;
+    lo_s = color_src & 4294967295;
+    w_src = hi_s | lo_s;
+    idx = 0;
+    loop (step:128 = 0 .. 128) [
+        dst_words@[idx] = w_dst;
+        src_words@[idx] = w_src;
+        idx = idx + 1;
+    ]
+
+    hd_composite_source_over!(dst_words, src_words);
+
+    // Dst must be completely overwritten by src
+    if (dst_words@[0] != w_src) [ ret 1; ]
+    if (dst_words@[127] != w_src) [ ret 2; ]
+    ret 0;
+]
+
+fn test_hd_compositor_linear_blend!(dst_words, src_words) [
+    // Dst: White (255, 255, 255, 255) = 4294967295
+    // Src: Red 50% premultiplied: (128, 0, 0, 128)
+    // 128 | (0 << 8) | (0 << 16) | (128 << 24) = 128 | 2147483648 = 2147483776
+    color_dst = 4294967295;
+    color_src = 2147483776;
+
+    hi_d = color_dst << 32;
+    lo_d = color_dst & 4294967295;
+    w_dst = hi_d | lo_d;
+    hi_s = color_src << 32;
+    lo_s = color_src & 4294967295;
+    w_src = hi_s | lo_s;
+
+    dst_words@[0] = w_dst;
+    src_words@[0] = w_src;
+
+    hd_composite_source_over!(dst_words, src_words);
+
+    res_w = dst_words@[0];
+    p0 = res_w & 4294967295;
+    p0_r = p0 & 255;
+    p0_g = (p0 >> 8) & 255;
+    p0_b = (p0 >> 16) & 255;
+    p0_a = (p0 >> 24) & 255;
+
+    // Analytical expectations:
+    // R: 128 + (255 * 128 >> 8) = 128 + 127 = 255
+    // G: 0 + (255 * 128 >> 8) = 127
+    // B: 0 + (255 * 128 >> 8) = 127
+    // A: 128 + (255 * 128 >> 8) = 255
+    if (p0_r != 255) [ ret 1; ]
+    if (p0_g != 127) [ ret 2; ]
+    if (p0_b != 127) [ ret 3; ]
+    if (p0_a != 255) [ ret 4; ]
+    ret 0;
+]
+
+fn test_hd_saturating_overflow() [
+    // Test that adding two high components saturates to 255 and does not wrap to 0
+    res = hd_blend_channel(200, 200, 256);
+    if (res != 255) [ ret 1; ]
+    ret 0;
+]
+
+fn test_hd_50_stacked_windows_gate!(tape, mask_ptr) [
+    // Create 50 stacked opaque windows:
+    // Windows 0..48 are background dialogs/panels inside [10..100, 10..50]
+    // Window 49 is topmost foreground fullscreen window [0..119, 0..63] with EFFECT_SHUTTER
+    loop (i:50 = 0 .. 50) [
+        off = i * 4;
+        tx_lo = 10;
+        tx_hi = 100;
+        ty_lo = 10;
+        ty_hi = 50;
+        eff = 1;
+        if (i == 49) [
+            tx_lo = 0;
+            tx_hi = 119;
+            ty_lo = 0;
+            ty_hi = 63;
+            eff = 2; // Topmost window has EFFECT_SHUTTER
+        ]
+        tx_span = (tx_lo << 8) | tx_hi;
+        eff_sh = eff << 48;
+        span_sh = tx_span << 32;
+        op_sh = 1 << 56;
+        w0_a = op_sh | eff_sh;
+        w0_b = span_sh | 4278190335;
+        w0 = w0_a | w0_b;
+        tape@[off] = w0;
+        off1 = off + 1;
+        tape@[off1] = 0;
+        off2 = off + 2;
+        p2_hi = 491520 << 32;
+        p2_lo = 276480 & 4294967295;
+        tape@[off2] = p2_hi | p2_lo;
+        off3 = off + 3;
+        m3 = fl_make_row_mask(ty_lo, ty_hi);
+        tape@[off3] = m3;
+    ]
+
+    reaped_count = hd_reap_shutter!(tape, 50, mask_ptr);
+
+    // Exactly 49 background windows must be reaped to NOP (0 cycles)
+    if (reaped_count != 49) [
+        ret 1;
+    ]
+
+    // Topmost window (command 49) must remain intact
+    off_top = 49 * 4;
+    w0_top = tape@[off_top];
+    if (w0_top == 0) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_hd_multitile_hollow_interior_audit!(tape, backdrop_buf, warp_scratch, cov_buf) [
+    // Create a 4-tile wide rectangle from x = 0 to x = 64px (16384 in Q24.8)
+    // Spans horizontally across Tile 0, 1, 2, 3 in row ty = 0
+    idx_ptr = backdrop_buf;
+    idx_ptr@[0] = 0;
+    rgba = 4294967295;
+
+    // Left edge (x=0, y=0) -> (x=0, y=4096)
+    fl_emit_cord_raw!(tape, idx_ptr, 0, 0, 0, 4096, rgba);
+    // Bottom edge (x=0, y=4096) -> (x=16384, y=4096)
+    fl_emit_cord_raw!(tape, idx_ptr, 0, 4096, 16384, 4096, rgba);
+    // Right edge (x=16384, y=4096) -> (x=16384, y=0)
+    fl_emit_cord_raw!(tape, idx_ptr, 16384, 4096, 16384, 0, rgba);
+    // Top edge (x=16384, y=0) -> (x=0, y=0)
+    fl_emit_cord_raw!(tape, idx_ptr, 16384, 0, 0, 0, rgba);
+
+    total_cords = idx_ptr@[0];
+
+    // Evaluate row ty = 0 with nx = 2 (weaves Tile 0, then Tile 1).
+    // Streams backdrop_buf in-place across the row.
+    // At return, cov_buf holds the coverage of Tile 1 (an interior tile).
+    lm_weave_tile_row!(tape, total_cords, 0, 2, 0, warp_scratch, cov_buf, backdrop_buf);
+
+    cov0 = cov_buf@[0];
+    if (cov0 != 256) [
+        // FAILED: Intermediate tile interior is hollow!
+        ret 1;
+    ]
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+
+    shutter_mask = arena_alloc_words!(arena, 128);
+    tape = arena_alloc_words!(arena, 256);
+    backdrop_in = arena_alloc_words!(arena, 16);
+    backdrop_out = arena_alloc_words!(arena, 16);
+    tile_words_dst = arena_alloc_words!(arena, 128);
+    tile_words_src = arena_alloc_words!(arena, 128);
+    warp_scratch = arena_alloc_words!(arena, 272);
+    cov_buf = arena_alloc_words!(arena, 256);
+
+    r1 = test_hd_shutter_bitops!(shutter_mask);
+    if (r1 != 0) [ sys_exit!(101); ]
+
+    r2 = test_hd_shutter_interior!(shutter_mask);
+    if (r2 != 0) [ sys_exit!(102); ]
+
+    r3 = test_hd_occlusion_query!(shutter_mask);
+    if (r3 != 0) [ sys_exit!(103); ]
+
+    r4 = test_hd_reaper!(tape, shutter_mask);
+    if (r4 != 0) [ sys_exit!(104); ]
+
+    r5 = test_hd_solid_interior_folder!(backdrop_in, tile_words_dst);
+    if (r5 != 0) [ sys_exit!(105); ]
+
+    r6 = test_hd_backdrop_carry_multitile!(tape, backdrop_in, backdrop_out, warp_scratch, cov_buf);
+    if (r6 != 0) [ sys_exit!(106); ]
+
+    r7 = test_hd_compositor_zero_alpha!(tile_words_dst, tile_words_src);
+    if (r7 != 0) [ sys_exit!(107); ]
+
+    r8 = test_hd_compositor_full_alpha!(tile_words_dst, tile_words_src);
+    if (r8 != 0) [ sys_exit!(108); ]
+
+    r9 = test_hd_compositor_linear_blend!(tile_words_dst, tile_words_src);
+    if (r9 != 0) [ sys_exit!(109); ]
+
+    r10 = test_hd_saturating_overflow();
+    if (r10 != 0) [ sys_exit!(110); ]
+
+    r11 = test_hd_50_stacked_windows_gate!(tape, shutter_mask);
+    if (r11 != 0) [ sys_exit!(111); ]
+
+    r12 = test_hd_multitile_hollow_interior_audit!(tape, backdrop_in, warp_scratch, cov_buf);
+    if (r12 != 0) [ sys_exit!(112); ]
+
+    sys_exit!(0);
+]

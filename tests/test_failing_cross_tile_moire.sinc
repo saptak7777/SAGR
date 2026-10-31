@@ -1,0 +1,129 @@
+// ==========================================
+// tests/test_failing_cross_tile_moire.sinc
+// Regression test capturing the Cross-Tile Moiré / Phantom Impulse flaw.
+// THIS TEST WILL FAIL UNTIL THE ROOT CAUSE IS FIXED.
+// ==========================================
+
+fn test_cord_outside_tile_phantom_impulse!(warp_ptr) [
+    // Tile is at tx = 5, ty = 0 -> x_tile = 5 * 4096 = 20480 (80px in Q24.8)
+    // Cord is at x = 2560 (10px in Q24.8, inside Tile 0), from y = 100 to y = 200
+    // Because x is far to the left of Tile 5, Tile 5 should NOT receive any phantom impulse!
+    
+    // Clear warp_ptr
+    loop (i:256 = 0 .. 256) [
+        warp_ptr@[i] = 0;
+    ]
+
+    // Slice row 0 of Tile 5:
+    // Cords coordinates in global Q24.8:
+    // x0 = 2560, y0 = 100, x1 = 2560, y1 = 200
+    lm_slice_cord_row!(warp_ptr, 5, 0, 0, 2560, 100, 2560, 200);
+
+    // Flaw Check: In the unpatched engine, x_local < 0 adds delta_y to column 0!
+    // Column 0 should be 0 (zero phantom impulse).
+    col0_val = warp_ptr@[0];
+    if (col0_val != 0) [
+        // FAILED: Phantom impulse leaked into column 0 of tile to the right!
+        ret 1;
+    ]
+    ret 0;
+]
+
+fn test_column_15_spill_loss!(warp_ptr) [
+    // Tile 0: tx = 0, ty = 0.
+    // Cord crosses at column 15 with subpixel position (e.g. x = 3968, delta_y = 200)
+    loop (i:272 = 0 .. 272) [
+        warp_ptr@[i] = 0;
+    ]
+
+    // Vertical line at x = 3968 (col 15, subpixel 128), delta_y = 200 (y0 = 50, y1 = 250)
+    lm_slice_cord_row!(warp_ptr, 0, 0, 0, 3968, 50, 3968, 250);
+
+    w15 = warp_ptr@[15];
+    if (w15 != 100) [
+        ret 1;
+    ]
+    w_term = warp_ptr@[256];
+    if (w_term != 100) [
+        ret 2;
+    ]
+    row_sum = w15 + w_term;
+    if (row_sum != 200) [
+        // FAILED: Area conservation violated at tile boundary!
+        ret 3;
+    ]
+    ret 0;
+]
+
+fn test_column_15_subpixel_antialiasing!(warp_ptr) [
+    loop (i:272 = 0 .. 272) [
+        warp_ptr@[i] = 0;
+    ]
+    // Vertical cord at col 15, subpixel 128 (x = 3968), delta_y = 200
+    // Midpoint is at subpixel 128 (center of pixel 15)
+    // Pixel 15 analytical coverage must be 50% of 200 = 100 units
+    lm_slice_cord_row!(warp_ptr, 0, 0, 0, 3968, 50, 3968, 250);
+    lm_weft_row!(warp_ptr, 0);
+    cov15 = warp_ptr@[15];
+    if (cov15 != 100) [
+        // FAILED: Column 15 received full delta_y (200) instead of anti-aliased 100!
+        ret 3;
+    ]
+    ret 0;
+]
+
+fn test_boundary_wedge_closure!(warp_ptr) [
+    loop (i:272 = 0 .. 272) [
+        warp_ptr@[i] = 0;
+    ]
+    // Closed wedge inside Tile 0 with right edge exactly at tile boundary x = 4096:
+    // Downward edge at x = 4096 (delta_y = 200, y0 = 50, y1 = 250)
+    // Slanted upward edge from (3968, 250) up to (4096, 50) (delta_y = -200)
+    // The wedge is 100% inside Tile 0 (x <= 4096).
+    // Total net flux exiting row 0 must be 0 (closed polygon).
+    lm_slice_cord_row!(warp_ptr, 0, 0, 0, 4096, 50, 4096, 250);
+    lm_slice_cord_row!(warp_ptr, 0, 0, 0, 3968, 250, 4096, 50);
+
+    row_sum = 0;
+    loop (c:16 = 0 .. 16) [
+        row_sum = row_sum + warp_ptr@[c];
+    ]
+    w_term = warp_ptr@[256];
+    total_exit = row_sum + w_term;
+    if (total_exit != 0) [
+        // FAILED: Polygon right edge at x = 4096 was discarded, leaving trapped tension in Tile 0!
+        ret 4;
+    ]
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [ sys_exit!(1); ]
+
+    warp_ptr = arena_alloc_words!(arena, 272);
+
+    r1 = test_cord_outside_tile_phantom_impulse!(warp_ptr);
+    if (r1 != 0) [
+        sys_exit!(101);
+    ]
+
+    r2 = test_column_15_spill_loss!(warp_ptr);
+    if (r2 != 0) [
+        sys_exit!(102);
+    ]
+
+    r3 = test_column_15_subpixel_antialiasing!(warp_ptr);
+    if (r3 != 0) [
+        sys_exit!(103);
+    ]
+
+    r4 = test_boundary_wedge_closure!(warp_ptr);
+    if (r4 != 0) [
+        sys_exit!(104);
+    ]
+
+    sys_exit!(0);
+]

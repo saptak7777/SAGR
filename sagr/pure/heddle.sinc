@@ -1,0 +1,207 @@
+// ==========================================
+// sagr/pure/heddle.sinc
+// The Heddle: Backdrop Tension, Shutter Reaper & Compositor
+// ==========================================
+
+const EFFECT_PURE = 1;
+const EFFECT_SHUTTER = 2;
+
+fn hd_stamp_tile!(mask_ptr, tx, ty) [
+    bo_stamp_tile!(mask_ptr, tx, ty);
+    ret 0;
+]
+
+fn hd_test_tile(mask_ptr, tx, ty) [
+    t = bo_test_tile(mask_ptr, tx, ty);
+    ret t;
+]
+
+fn hd_stamp_shutter_interior!(mask_ptr, tx_lo, ty_lo, tx_hi, ty_hi) [
+    // Interior tiles are strictly [tx_lo + 1 .. tx_hi - 1], [ty_lo + 1 .. ty_hi - 1]
+    int_tx_lo = tx_lo + 1;
+    int_tx_hi = tx_hi - 1;
+    int_ty_lo = ty_lo + 1;
+    int_ty_hi = ty_hi - 1;
+
+    if (int_tx_lo > int_tx_hi) [
+        ret 0;
+    ]
+    if (int_ty_lo > int_ty_hi) [
+        ret 0;
+    ]
+
+    y_limit = int_ty_hi + 1;
+    x_limit = int_tx_hi + 1;
+
+    loop (cur_y:SLSP_TILES_Y = int_ty_lo .. y_limit) [
+        loop (cur_x:SLSP_TILES_X = int_tx_lo .. x_limit) [
+            hd_stamp_tile!(mask_ptr, cur_x, cur_y);
+        ]
+    ]
+    ret 0;
+]
+
+fn hd_is_occluded(mask_ptr, tx_lo, ty_lo, tx_hi, ty_hi) [
+    y_limit = ty_hi + 1;
+    x_limit = tx_hi + 1;
+
+    loop (cur_y:SLSP_TILES_Y = ty_lo .. y_limit) [
+        loop (cur_x:SLSP_TILES_X = tx_lo .. x_limit) [
+            is_set = hd_test_tile(mask_ptr, cur_x, cur_y);
+            if (is_set == 0) [
+                ret 0;
+            ]
+        ]
+    ]
+    ret 1;
+]
+
+fn hd_reap_shutter!(tape, tape_len, shutter_mask) [
+    zi = 0;
+    loop (step:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
+        shutter_mask@[zi] = 0;
+        zi = zi + 1;
+    ]
+
+    reaped_count = 0;
+    loop (step:10000 = 0 .. tape_len) [
+        ci = (tape_len - 1) - step;
+        off = ci * 4;
+        w0 = tape@[off];
+        op = w0 >> 56;
+        if (op != 0) [
+            w0_eff = w0 >> 48;
+            effect = w0_eff & 255;
+            w0_span = w0 >> 32;
+            tx_span = w0_span & 65535;
+            tx_lo = tx_span >> 8;
+            tx_hi = tx_span & 255;
+
+            w3_idx = off + 3;
+            w3 = tape@[w3_idx];
+            ty_lo = ctz64(w3);
+            lz = lzcnt64(w3);
+            ty_hi = 63 - lz;
+
+            if (effect == EFFECT_SHUTTER) [
+                hd_stamp_shutter_interior!(shutter_mask, tx_lo, ty_lo, tx_hi, ty_hi);
+            ]
+            if (effect != EFFECT_SHUTTER) [
+                is_occ = hd_is_occluded(shutter_mask, tx_lo, ty_lo, tx_hi, ty_hi);
+                if (is_occ == 1) [
+                    w1_idx = off + 1;
+                    w2_idx = off + 2;
+                    tape@[off] = 0;
+                    tape@[w1_idx] = 0;
+                    tape@[w2_idx] = 0;
+                    tape@[w3_idx] = 0;
+                    reaped_count = reaped_count + 1;
+                ]
+            ]
+        ]
+    ]
+    ret reaped_count;
+]
+
+fn hd_backdrop_init!(backdrop_buf) [
+    r = 0;
+    loop (step:TILE_DIM = 0 .. TILE_DIM) [
+        backdrop_buf@[r] = 0;
+        r = r + 1;
+    ]
+    ret 0;
+]
+
+fn hd_is_solid_interior(active_cords, backdrop_buf) [
+    if (active_cords != 0) [
+        ret 0;
+    ]
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        bd = backdrop_buf@[r];
+        if (bd < 0) [
+            bd = 0 - bd;
+        ]
+        if (bd < 256) [
+            ret 0;
+        ]
+    ]
+    ret 1;
+]
+
+fn hd_broadcast_solid!(tile_words, solid_rgba) [
+    hi = solid_rgba << 32;
+    lo = solid_rgba & 4294967295;
+    word_val = hi | lo;
+    w = 0;
+    loop (step:TILE_WORDS = 0 .. TILE_WORDS) [
+        tile_words@[w] = word_val;
+        w = w + 1;
+    ]
+    ret 0;
+]
+
+fn hd_blend_channel(src_ch, dst_ch, inv_a) [
+    prod = dst_ch * inv_a;
+    sh = prod >> 8;
+    res = src_ch + sh;
+    if (res > 255) [
+        ret 255;
+    ]
+    ret res;
+]
+
+fn hd_blend_pixel(src_px, dst_px) [
+    s_r = src_px & 255;
+    s_g_sh = src_px >> 8;
+    s_g = s_g_sh & 255;
+    s_b_sh = src_px >> 16;
+    s_b = s_b_sh & 255;
+    s_a_sh = src_px >> 24;
+    s_a = s_a_sh & 255;
+
+    d_r = dst_px & 255;
+    d_g_sh = dst_px >> 8;
+    d_g = d_g_sh & 255;
+    d_b_sh = dst_px >> 16;
+    d_b = d_b_sh & 255;
+    d_a_sh = dst_px >> 24;
+    d_a = d_a_sh & 255;
+
+    inv_a = 256 - s_a;
+    out_r = hd_blend_channel(s_r, d_r, inv_a);
+    out_g = hd_blend_channel(s_g, d_g, inv_a);
+    out_b = hd_blend_channel(s_b, d_b, inv_a);
+    out_a = hd_blend_channel(s_a, d_a, inv_a);
+
+    g_sh = out_g << 8;
+    b_sh = out_b << 16;
+    a_sh = out_a << 24;
+    rg = out_r | g_sh;
+    ba = b_sh | a_sh;
+    res = rg | ba;
+    ret res;
+]
+
+fn hd_composite_source_over!(dst_tile_words, src_tile_words) [
+    w = 0;
+    loop (step:TILE_WORDS = 0 .. TILE_WORDS) [
+        src_w = src_tile_words@[w];
+        dst_w = dst_tile_words@[w];
+
+        s0 = src_w & 4294967295;
+        d0 = dst_w & 4294967295;
+        p0 = hd_blend_pixel(s0, d0);
+
+        s1_sh = src_w >> 32;
+        s1 = s1_sh & 4294967295;
+        d1_sh = dst_w >> 32;
+        d1 = d1_sh & 4294967295;
+        p1 = hd_blend_pixel(s1, d1);
+
+        w_hi = p1 << 32;
+        w_lo = p0 & 4294967295;
+        dst_tile_words@[w] = w_hi | w_lo;
+        w = w + 1;
+    ]
+    ret 0;
+]

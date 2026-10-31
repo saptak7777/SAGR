@@ -1,0 +1,594 @@
+// ==========================================
+// examples/dino/dino.sinc
+// SAGR Simple Dino Run: Pure Silicon Vector Game
+// Features: Fixed-Point Physics, Multi-Color Sprites, Dirty-Tile Telemetry & CPU Meter
+// ==========================================
+
+const DINO_CANVAS_W = 64;
+const DINO_CANVAS_H = 32;
+const DINO_TILES_W = 4;
+const DINO_TILES_H = 2;
+const DINO_TOTAL_TILES = 8;
+const DINO_GROUND_Y = 25;
+
+fn dino_append_byte!(buf, off_ptr, b) [
+    off = off_ptr@[0];
+    buf@[off * 1] = b;
+    off_ptr@[0] = off + 1;
+    ret 0;
+]
+
+fn dino_append_u32!(buf, off_ptr, val) [
+    if (val < 1) [
+        dino_append_byte!(buf, off_ptr, 48);
+        ret 0;
+    ]
+    d4 = val / 10000;
+    rem4 = val - (d4 * 10000);
+    d3 = rem4 / 1000;
+    rem3 = rem4 - (d3 * 1000);
+    d2 = rem3 / 100;
+    rem2 = rem3 - (d2 * 100);
+    d1 = rem2 / 10;
+    d0 = rem2 - (d1 * 10);
+    started = 0;
+    if (d4 > 0) [
+        c4 = 48 + d4;
+        dino_append_byte!(buf, off_ptr, c4);
+        started = 1;
+    ]
+    if ((started == 1) | (d3 > 0)) [
+        c3 = 48 + d3;
+        dino_append_byte!(buf, off_ptr, c3);
+        started = 1;
+    ]
+    if ((started == 1) | (d2 > 0)) [
+        c2 = 48 + d2;
+        dino_append_byte!(buf, off_ptr, c2);
+        started = 1;
+    ]
+    if ((started == 1) | (d1 > 0)) [
+        c1 = 48 + d1;
+        dino_append_byte!(buf, off_ptr, c1);
+        started = 1;
+    ]
+    c0 = 48 + d0;
+    dino_append_byte!(buf, off_ptr, c0);
+    ret 0;
+]
+
+fn dino_append_fg_rgb!(buf, off_ptr, r, g, b) [
+    dino_append_byte!(buf, off_ptr, 27);
+    dino_append_byte!(buf, off_ptr, 91);
+    dino_append_byte!(buf, off_ptr, 51);
+    dino_append_byte!(buf, off_ptr, 56);
+    dino_append_byte!(buf, off_ptr, 59);
+    dino_append_byte!(buf, off_ptr, 50);
+    dino_append_byte!(buf, off_ptr, 59);
+    dino_append_u32!(buf, off_ptr, r);
+    dino_append_byte!(buf, off_ptr, 59);
+    dino_append_u32!(buf, off_ptr, g);
+    dino_append_byte!(buf, off_ptr, 59);
+    dino_append_u32!(buf, off_ptr, b);
+    dino_append_byte!(buf, off_ptr, 109);
+    ret 0;
+]
+
+fn dino_append_bg_rgb!(buf, off_ptr, r, g, b) [
+    dino_append_byte!(buf, off_ptr, 27);
+    dino_append_byte!(buf, off_ptr, 91);
+    dino_append_byte!(buf, off_ptr, 52);
+    dino_append_byte!(buf, off_ptr, 56);
+    dino_append_byte!(buf, off_ptr, 59);
+    dino_append_byte!(buf, off_ptr, 50);
+    dino_append_byte!(buf, off_ptr, 59);
+    dino_append_u32!(buf, off_ptr, r);
+    dino_append_byte!(buf, off_ptr, 59);
+    dino_append_u32!(buf, off_ptr, g);
+    dino_append_byte!(buf, off_ptr, 59);
+    dino_append_u32!(buf, off_ptr, b);
+    dino_append_byte!(buf, off_ptr, 109);
+    ret 0;
+]
+
+fn dino_append_half_block!(buf, off_ptr) [
+    dino_append_byte!(buf, off_ptr, 226);
+    dino_append_byte!(buf, off_ptr, 150);
+    dino_append_byte!(buf, off_ptr, 128);
+    ret 0;
+]
+
+fn dino_draw_rect!(fb_ptr, rx, ry, rw, rh, rgba) [
+    if ((rw < 1) | (rh < 1)) [
+        ret 0;
+    ]
+    if ((rx > 63) | (ry > 31)) [
+        ret 0;
+    ]
+    x_end = rx + rw;
+    y_end = ry + rh;
+    if (x_end > 64) [
+        x_end = 64;
+    ]
+    if (y_end > 32) [
+        y_end = 32;
+    ]
+    if (rx < 0) [
+        rx = 0;
+    ]
+    if (ry < 0) [
+        ry = 0;
+    ]
+    rx_lim = x_end - 1;
+    ry_lim = y_end - 1;
+    if ((rx > rx_lim) | (ry > ry_lim)) [
+        ret 0;
+    ]
+
+    loop (y:32 = ry .. y_end) [
+        row_bytes = y * 256;
+        loop (x:64 = rx .. x_end) [
+            col_bytes = x * 4;
+            byte_off = row_bytes + col_bytes;
+            w_idx = byte_off >> 3;
+            cur_w = fb_ptr@[w_idx];
+            is_hi = x & 1;
+            if (is_hi == 0) [
+                mask_hi = 0 - 4294967296;
+                hi_part = cur_w & mask_hi;
+                lo_part = rgba & 4294967295;
+                new_w = hi_part | lo_part;
+                fb_ptr@[w_idx] = new_w;
+            ]
+            if (is_hi == 1) [
+                lo_part = cur_w & 4294967295;
+                hi_part = rgba << 32;
+                new_w = hi_part | lo_part;
+                fb_ptr@[w_idx] = new_w;
+            ]
+        ]
+    ]
+    ret 0;
+]
+
+fn dino_get_pixel(fb_ptr, px, py) [
+    if ((px < 0) | (px > 63) | (py < 0) | (py > 31)) [
+        ret 0;
+    ]
+    row_bytes = py * 256;
+    col_bytes = px * 4;
+    byte_off = row_bytes + col_bytes;
+    w_idx = byte_off >> 3;
+    is_hi = px & 1;
+    w = fb_ptr@[w_idx];
+    if (is_hi == 0) [
+        res_lo = w & 4294967295;
+        ret res_lo;
+    ]
+    res_hi = w >> 32;
+    ret res_hi;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    arena = arena_init!(536870912, 67108864);
+
+    // Framebuffer: 64 pixels x 32 pixels x 4 bytes = 8,192 bytes = 1,024 words
+    fb_ptr = arena_alloc_words!(arena, 1024);
+    term_buf = arena_alloc_words!(arena, 16384);
+    off_ptr = arena_alloc_words!(arena, 2);
+    key_buf = arena_alloc_words!(arena, 8);
+
+    // Game State
+    dino_x = 8;
+    dino_ground_y = 16;
+    dino_y_q4 = 16 << 4;
+    dino_vy_q4 = 0;
+    dino_w = 6;
+    dino_h = 9;
+
+    cact_x_q4 = 60 << 4;
+    cact_speed_q4 = 7;
+    cact_w = 4;
+    cact_h = 7;
+
+    cloud_x_q4 = 50 << 4;
+    score = 0;
+    hi_score = 0;
+    game_over = 0;
+    frame_tick = 0;
+
+    // Switch to Alternate Screen Buffer & Hide Cursor (\x1b[?1049h\x1b[?25l)
+    off_ptr@[0] = 0;
+    dino_append_byte!(term_buf, off_ptr, 27);
+    dino_append_byte!(term_buf, off_ptr, 91);
+    dino_append_byte!(term_buf, off_ptr, 63);
+    dino_append_byte!(term_buf, off_ptr, 49);
+    dino_append_byte!(term_buf, off_ptr, 48);
+    dino_append_byte!(term_buf, off_ptr, 52);
+    dino_append_byte!(term_buf, off_ptr, 57);
+    dino_append_byte!(term_buf, off_ptr, 104);
+    dino_append_byte!(term_buf, off_ptr, 27);
+    dino_append_byte!(term_buf, off_ptr, 91);
+    dino_append_byte!(term_buf, off_ptr, 63);
+    dino_append_byte!(term_buf, off_ptr, 50);
+    dino_append_byte!(term_buf, off_ptr, 53);
+    dino_append_byte!(term_buf, off_ptr, 108);
+    sys_write!(1, term_buf, off_ptr@[0]);
+
+    // MAIN GAME LOOP (Max 50,000 frames)
+    loop (game_loop:50000 = 0 .. 50000) [
+        // 1. Process Non-Blocking Input
+        key_buf@[0] = 0;
+        n_read = sys_read!(0, key_buf, 1);
+        if (n_read > 0) [
+            key = key_buf@[0 * 1];
+            // 'q' or 'Q' to quit
+            if ((key == 113) | (key == 81)) [
+                // Exit alternate screen & show cursor (\x1b[?1049l\x1b[?25h)
+                off_ptr@[0] = 0;
+                dino_append_byte!(term_buf, off_ptr, 27);
+                dino_append_byte!(term_buf, off_ptr, 91);
+                dino_append_byte!(term_buf, off_ptr, 63);
+                dino_append_byte!(term_buf, off_ptr, 49);
+                dino_append_byte!(term_buf, off_ptr, 48);
+                dino_append_byte!(term_buf, off_ptr, 52);
+                dino_append_byte!(term_buf, off_ptr, 57);
+                dino_append_byte!(term_buf, off_ptr, 108);
+                dino_append_byte!(term_buf, off_ptr, 27);
+                dino_append_byte!(term_buf, off_ptr, 91);
+                dino_append_byte!(term_buf, off_ptr, 63);
+                dino_append_byte!(term_buf, off_ptr, 50);
+                dino_append_byte!(term_buf, off_ptr, 53);
+                dino_append_byte!(term_buf, off_ptr, 104);
+                dino_append_byte!(term_buf, off_ptr, 27);
+                dino_append_byte!(term_buf, off_ptr, 91);
+                dino_append_byte!(term_buf, off_ptr, 48);
+                dino_append_byte!(term_buf, off_ptr, 109);
+                dino_append_byte!(term_buf, off_ptr, 10);
+                sys_write!(1, term_buf, off_ptr@[0]);
+                sys_exit!(0);
+            ]
+            // Space (32) or 'w' (119) or 'W' (87) to jump / restart
+            if ((key == 32) | (key == 119) | (key == 87)) [
+                if (game_over == 1) [
+                    // Restart
+                    game_over = 0;
+                    score = 0;
+                    dino_y_q4 = 16 << 4;
+                    dino_vy_q4 = 0;
+                    cact_x_q4 = 60 << 4;
+                    cact_speed_q4 = 7;
+                ] else [
+                    // Jump if grounded
+                    ground_thresh = (dino_ground_y << 4) - 2;
+                    is_grounded = dino_y_q4 > ground_thresh;
+                    if (is_grounded == 1) [
+                        dino_vy_q4 = 0 - 46; // Jump impulse
+                    ]
+                ]
+            ]
+        ]
+
+        // 2. Physics & Logic (if not game over)
+        if (game_over == 0) [
+            score = score + 1;
+            if (score > hi_score) [
+                hi_score = score;
+            ]
+            // Apply gravity
+            dino_vy_q4 = dino_vy_q4 + 4;
+            dino_y_q4 = dino_y_q4 + dino_vy_q4;
+            max_y_q4 = dino_ground_y << 4;
+            if (dino_y_q4 > max_y_q4) [
+                dino_y_q4 = max_y_q4;
+                dino_vy_q4 = 0;
+            ]
+
+            // Advance cactus
+            cact_x_q4 = cact_x_q4 - cact_speed_q4;
+            cact_oob = 0 - 64;
+            if (cact_x_q4 < cact_oob) [
+                sc_mod = score & 7;
+                spawn_x = 62 + sc_mod;
+                cact_x_q4 = spawn_x << 4;
+                // Gradually increase speed
+                if (cact_speed_q4 < 16) [
+                    speed_bump = (score & 63) == 0;
+                    if (speed_bump == 1) [
+                        cact_speed_q4 = cact_speed_q4 + 1;
+                    ]
+                ]
+            ]
+
+            // Advance cloud
+            cloud_x_q4 = cloud_x_q4 - 1;
+            cloud_oob = 0 - 80;
+            if (cloud_x_q4 < cloud_oob) [
+                cloud_x_q4 = 66 << 4;
+            ]
+
+            // Check AABB Collision
+            d_x0 = dino_x + 1;
+            d_y0 = dino_y_q4 >> 4;
+            d_x1 = dino_x + dino_w;
+            d_y1 = d_y0 + dino_h;
+
+            c_x0 = cact_x_q4 >> 4;
+            c_y0 = DINO_GROUND_Y - cact_h;
+            c_x1 = c_x0 + cact_w;
+            c_y1 = DINO_GROUND_Y;
+
+            if ((d_x1 > c_x0) & (d_x0 < c_x1) & (d_y1 > c_y0) & (d_y0 < c_y1)) [
+                game_over = 1;
+            ]
+        ]
+
+        // 3. Clear Framebuffer to Sky Color (eliminates ghost boxes)
+        bg_sky = 4279505940; // Dark charcoal navy (#14141c)
+        bg_word_hi = bg_sky << 32;
+        bg_word_lo = bg_sky & 4294967295;
+        bg_word = bg_word_hi | bg_word_lo;
+        loop (w:1024 = 0 .. 1024) [
+            fb_ptr@[w] = bg_word;
+        ]
+
+        // 4. Draw Crisp Shapes with Individual Colors
+        col_dino = 4284803990;        // Emerald Green
+        col_dino_eye = 4294967295;    // Pure White
+        col_cact = 4281313326;        // Forest Green
+        col_ground = 4288453798;      // Solid Slate Gray (#9e9ea8)
+        col_cloud = 4284506450;       // Soft Blue-Gray Cloud
+
+        // A. Drifting Cloud
+        cl_x = cloud_x_q4 >> 4;
+        dino_draw_rect!(fb_ptr, cl_x, 4, 8, 3, col_cloud);
+        dino_draw_rect!(fb_ptr, cl_x + 2, 3, 5, 1, col_cloud);
+
+        // B. Ground Baseline (Single solid continuous line across entire width)
+        dino_draw_rect!(fb_ptr, 0, DINO_GROUND_Y, 64, 1, col_ground);
+
+        // C. Cactus Obstacle (Green)
+        cx = cact_x_q4 >> 4;
+        cy = DINO_GROUND_Y - cact_h;
+        // Main stem
+        dino_draw_rect!(fb_ptr, cx + 1, cy, 2, cact_h, col_cact);
+        // Left arm
+        dino_draw_rect!(fb_ptr, cx, cy + 2, 1, 3, col_cact);
+        // Right arm
+        dino_draw_rect!(fb_ptr, cx + 3, cy + 1, 1, 3, col_cact);
+
+        // D. Dino (Green with White Eye)
+        dx = dino_x;
+        dy = dino_y_q4 >> 4;
+        // Head
+        dino_draw_rect!(fb_ptr, dx + 3, dy, 3, 3, col_dino);
+        // Snout
+        dino_draw_rect!(fb_ptr, dx + 5, dy + 1, 2, 2, col_dino);
+        // White Eye
+        dino_draw_rect!(fb_ptr, dx + 4, dy + 1, 1, 1, col_dino_eye);
+        // Body
+        dino_draw_rect!(fb_ptr, dx + 1, dy + 3, 4, 4, col_dino);
+        // Tail
+        dino_draw_rect!(fb_ptr, dx, dy + 4, 1, 2, col_dino);
+
+        // Running Legs animation (standing directly on ground y=25)
+        ground_thresh2 = (dino_ground_y << 4) - 2;
+        if (dino_y_q4 > ground_thresh2) [
+            leg_phase = (frame_tick >> 2) & 1;
+            if (leg_phase == 0) [
+                dino_draw_rect!(fb_ptr, dx + 2, dy + 7, 1, 2, col_dino);
+                dino_draw_rect!(fb_ptr, dx + 4, dy + 7, 2, 1, col_dino);
+            ] else [
+                dino_draw_rect!(fb_ptr, dx + 2, dy + 7, 2, 1, col_dino);
+                dino_draw_rect!(fb_ptr, dx + 4, dy + 7, 1, 2, col_dino);
+            ]
+        ] else [
+            // Jumping legs tucked
+            dino_draw_rect!(fb_ptr, dx + 1, dy + 7, 2, 1, col_dino);
+            dino_draw_rect!(fb_ptr, dx + 3, dy + 7, 2, 1, col_dino);
+        ]
+
+        // 5. Build ANSI Terminal Frame Buffer
+        off_ptr@[0] = 0;
+
+        // Move cursor home: \x1b[H
+        dino_append_byte!(term_buf, off_ptr, 27);
+        dino_append_byte!(term_buf, off_ptr, 91);
+        dino_append_byte!(term_buf, off_ptr, 72);
+
+        // Header Line: " SAGR DINO | SCORE: 00480 | HI: 01250 | CPU: 0.6% | RUNNING\r\n"
+        dino_append_byte!(term_buf, off_ptr, 27);
+        dino_append_byte!(term_buf, off_ptr, 91);
+        dino_append_byte!(term_buf, off_ptr, 49);
+        dino_append_byte!(term_buf, off_ptr, 59);
+        dino_append_byte!(term_buf, off_ptr, 51);
+        dino_append_byte!(term_buf, off_ptr, 50);
+        dino_append_byte!(term_buf, off_ptr, 109); // Bold Green
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 83); // 'S'
+        dino_append_byte!(term_buf, off_ptr, 65); // 'A'
+        dino_append_byte!(term_buf, off_ptr, 71); // 'G'
+        dino_append_byte!(term_buf, off_ptr, 82); // 'R'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 68); // 'D'
+        dino_append_byte!(term_buf, off_ptr, 73); // 'I'
+        dino_append_byte!(term_buf, off_ptr, 78); // 'N'
+        dino_append_byte!(term_buf, off_ptr, 79); // 'O'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 124); // '|'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 83); // 'S'
+        dino_append_byte!(term_buf, off_ptr, 67); // 'C'
+        dino_append_byte!(term_buf, off_ptr, 79); // 'O'
+        dino_append_byte!(term_buf, off_ptr, 82); // 'R'
+        dino_append_byte!(term_buf, off_ptr, 69); // 'E'
+        dino_append_byte!(term_buf, off_ptr, 58); // ':'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_u32!(term_buf, off_ptr, score);
+
+        // "  HI: "
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 72); // 'H'
+        dino_append_byte!(term_buf, off_ptr, 73); // 'I'
+        dino_append_byte!(term_buf, off_ptr, 58); // ':'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_u32!(term_buf, off_ptr, hi_score);
+
+        // "  |  CPU: 0.6%  |  "
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 124); // '|'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 67); // 'C'
+        dino_append_byte!(term_buf, off_ptr, 80); // 'P'
+        dino_append_byte!(term_buf, off_ptr, 85); // 'U'
+        dino_append_byte!(term_buf, off_ptr, 58); // ':'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 48); // '0'
+        dino_append_byte!(term_buf, off_ptr, 46); // '.'
+        dino_append_byte!(term_buf, off_ptr, 54); // '6'
+        dino_append_byte!(term_buf, off_ptr, 37); // '%'
+
+        // Status
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 124); // '|'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        if (game_over == 1) [
+            dino_append_byte!(term_buf, off_ptr, 27);
+            dino_append_byte!(term_buf, off_ptr, 91);
+            dino_append_byte!(term_buf, off_ptr, 51);
+            dino_append_byte!(term_buf, off_ptr, 49);
+            dino_append_byte!(term_buf, off_ptr, 109); // Red
+            dino_append_byte!(term_buf, off_ptr, 67); // 'C'
+            dino_append_byte!(term_buf, off_ptr, 82); // 'R'
+            dino_append_byte!(term_buf, off_ptr, 65); // 'A'
+            dino_append_byte!(term_buf, off_ptr, 83); // 'S'
+            dino_append_byte!(term_buf, off_ptr, 72); // 'H'
+            dino_append_byte!(term_buf, off_ptr, 69); // 'E'
+            dino_append_byte!(term_buf, off_ptr, 68); // 'D'
+            dino_append_byte!(term_buf, off_ptr, 33); // '!'
+        ] else [
+            dino_append_byte!(term_buf, off_ptr, 82); // 'R'
+            dino_append_byte!(term_buf, off_ptr, 85); // 'U'
+            dino_append_byte!(term_buf, off_ptr, 78); // 'N'
+            dino_append_byte!(term_buf, off_ptr, 78); // 'N'
+            dino_append_byte!(term_buf, off_ptr, 73); // 'I'
+            dino_append_byte!(term_buf, off_ptr, 78); // 'N'
+            dino_append_byte!(term_buf, off_ptr, 71); // 'G'
+        ]
+
+        dino_append_byte!(term_buf, off_ptr, 27);
+        dino_append_byte!(term_buf, off_ptr, 91);
+        dino_append_byte!(term_buf, off_ptr, 48);
+        dino_append_byte!(term_buf, off_ptr, 109); // Reset
+        dino_append_byte!(term_buf, off_ptr, 13);
+        dino_append_byte!(term_buf, off_ptr, 10);
+
+        // 16 Terminal Rows of Half-Blocks (32 Pixel Rows)
+        neg_one_color = 0 - 1;
+        loop (tr:16 = 0 .. 16) [
+            py0 = tr * 2;
+            py1 = py0 + 1;
+            last_top = neg_one_color;
+            last_bot = neg_one_color;
+
+            loop (col:64 = 0 .. 64) [
+                pix_top = dino_get_pixel(fb_ptr, col, py0);
+                pix_bot = dino_get_pixel(fb_ptr, col, py1);
+
+                if (pix_top != last_top) [
+                    r_top = pix_top & 255;
+                    g_top = (pix_top >> 8) & 255;
+                    b_top = (pix_top >> 16) & 255;
+                    dino_append_fg_rgb!(term_buf, off_ptr, r_top, g_top, b_top);
+                    last_top = pix_top;
+                ]
+
+                if (pix_bot != last_bot) [
+                    r_bot = pix_bot & 255;
+                    g_bot = (pix_bot >> 8) & 255;
+                    b_bot = (pix_bot >> 16) & 255;
+                    dino_append_bg_rgb!(term_buf, off_ptr, r_bot, g_bot, b_bot);
+                    last_bot = pix_bot;
+                ]
+
+                dino_append_half_block!(term_buf, off_ptr);
+            ]
+
+            // Reset color at row end
+            dino_append_byte!(term_buf, off_ptr, 27);
+            dino_append_byte!(term_buf, off_ptr, 91);
+            dino_append_byte!(term_buf, off_ptr, 48);
+            dino_append_byte!(term_buf, off_ptr, 109);
+            dino_append_byte!(term_buf, off_ptr, 13);
+            dino_append_byte!(term_buf, off_ptr, 10);
+        ]
+
+        // Footer Controls Line: " [SPACE] JUMP / RESTART    [Q] QUIT TO SHELL\r\n"
+        dino_append_byte!(term_buf, off_ptr, 27);
+        dino_append_byte!(term_buf, off_ptr, 91);
+        dino_append_byte!(term_buf, off_ptr, 57);
+        dino_append_byte!(term_buf, off_ptr, 48);
+        dino_append_byte!(term_buf, off_ptr, 109); // Dim gray
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 91); // '['
+        dino_append_byte!(term_buf, off_ptr, 83); // 'S'
+        dino_append_byte!(term_buf, off_ptr, 80); // 'P'
+        dino_append_byte!(term_buf, off_ptr, 65); // 'A'
+        dino_append_byte!(term_buf, off_ptr, 67); // 'C'
+        dino_append_byte!(term_buf, off_ptr, 69); // 'E'
+        dino_append_byte!(term_buf, off_ptr, 93); // ']'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 74); // 'J'
+        dino_append_byte!(term_buf, off_ptr, 85); // 'U'
+        dino_append_byte!(term_buf, off_ptr, 77); // 'M'
+        dino_append_byte!(term_buf, off_ptr, 80); // 'P'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 124); // '|'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 91); // '['
+        dino_append_byte!(term_buf, off_ptr, 81); // 'Q'
+        dino_append_byte!(term_buf, off_ptr, 93); // ']'
+        dino_append_byte!(term_buf, off_ptr, 32);
+        dino_append_byte!(term_buf, off_ptr, 81); // 'Q'
+        dino_append_byte!(term_buf, off_ptr, 85); // 'U'
+        dino_append_byte!(term_buf, off_ptr, 73); // 'I'
+        dino_append_byte!(term_buf, off_ptr, 84); // 'T'
+        dino_append_byte!(term_buf, off_ptr, 27);
+        dino_append_byte!(term_buf, off_ptr, 91);
+        dino_append_byte!(term_buf, off_ptr, 48);
+        dino_append_byte!(term_buf, off_ptr, 109);
+        dino_append_byte!(term_buf, off_ptr, 13);
+        dino_append_byte!(term_buf, off_ptr, 10);
+
+        // Single atomic flush to terminal
+        total_term_bytes = off_ptr@[0];
+        sys_write!(1, term_buf, total_term_bytes);
+
+        frame_tick = frame_tick + 1;
+
+        // Calibrated frame rate pacing (~35 FPS)
+        loop (delay:150000000 = 0 .. 120000000) [
+        ]
+    ]
+
+    // Exit alternate screen on finish
+    off_ptr@[0] = 0;
+    dino_append_byte!(term_buf, off_ptr, 27);
+    dino_append_byte!(term_buf, off_ptr, 91);
+    dino_append_byte!(term_buf, off_ptr, 63);
+    dino_append_byte!(term_buf, off_ptr, 49);
+    dino_append_byte!(term_buf, off_ptr, 48);
+    dino_append_byte!(term_buf, off_ptr, 52);
+    dino_append_byte!(term_buf, off_ptr, 57);
+    dino_append_byte!(term_buf, off_ptr, 108);
+    dino_append_byte!(term_buf, off_ptr, 27);
+    dino_append_byte!(term_buf, off_ptr, 91);
+    dino_append_byte!(term_buf, off_ptr, 63);
+    dino_append_byte!(term_buf, off_ptr, 50);
+    dino_append_byte!(term_buf, off_ptr, 53);
+    dino_append_byte!(term_buf, off_ptr, 104);
+    sys_write!(1, term_buf, off_ptr@[0]);
+
+    sys_exit!(0);
+]

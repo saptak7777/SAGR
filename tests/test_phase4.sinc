@@ -1,0 +1,480 @@
+// ==========================================
+// tests/test_phase4.sinc
+// SAGR Phase 4 Comprehensive Test Suite: The Jacquard Loom Core
+// ==========================================
+
+fn test_lm_helpers() [
+    if (lm_abs(0) != 0) [ ret 1; ]
+    if (lm_abs(42) != 42) [ ret 2; ]
+    if (lm_abs(0 - 99) != 99) [ ret 3; ]
+
+    if (lm_clamp(5, 10, 20) != 10) [ ret 4; ]
+    if (lm_clamp(15, 10, 20) != 15) [ ret 5; ]
+    if (lm_clamp(25, 10, 20) != 20) [ ret 6; ]
+
+    if (lm_min(3, 7) != 3) [ ret 7; ]
+    if (lm_min(9, 4) != 4) [ ret 8; ]
+    if (lm_max(3, 7) != 7) [ ret 9; ]
+    if (lm_max(9, 4) != 9) [ ret 10; ]
+    ret 0;
+]
+
+fn test_lm_winding_rules() [
+    // Non-zero winding
+    if (lm_resolve_nonzero(0) != 0) [ ret 1; ]
+    if (lm_resolve_nonzero(100) != 100) [ ret 2; ]
+    if (lm_resolve_nonzero(256) != 256) [ ret 3; ]
+    if (lm_resolve_nonzero(300) != 256) [ ret 4; ]
+    if (lm_resolve_nonzero(512) != 256) [ ret 5; ]
+    if (lm_resolve_nonzero(0 - 100) != 100) [ ret 6; ]
+    if (lm_resolve_nonzero(0 - 256) != 256) [ ret 7; ]
+
+    // Even-odd winding
+    if (lm_resolve_evenodd(0) != 0) [ ret 8; ]
+    if (lm_resolve_evenodd(100) != 100) [ ret 9; ]
+    if (lm_resolve_evenodd(256) != 256) [ ret 10; ]
+    if (lm_resolve_evenodd(384) != 128) [ ret 11; ]
+    if (lm_resolve_evenodd(512) != 0) [ ret 12; ]
+    if (lm_resolve_evenodd(0 - 100) != 100) [ ret 13; ]
+    if (lm_resolve_evenodd(0 - 512) != 0) [ ret 14; ]
+    ret 0;
+]
+
+fn test_lm_weft_prefix_sum!(scratch) [
+    loop (zi:16 = 0 .. 16) [
+        scratch@[zi] = 0;
+    ]
+    // Impulse at col 0: 10
+    // Impulse at col 2: 5
+    // Impulse at col 5: 20
+    scratch@[0] = 10;
+    scratch@[2] = 5;
+    scratch@[5] = 20;
+
+    lm_weft_row!(scratch, 0);
+
+    // Expected prefix sum:
+    // col 0: 10
+    // col 1: 10
+    // col 2..4: 15
+    // col 5..15: 35
+    if (scratch@[0] != 10) [ ret 1; ]
+    if (scratch@[1] != 10) [ ret 2; ]
+    if (scratch@[2] != 15) [ ret 3; ]
+    if (scratch@[3] != 15) [ ret 4; ]
+    if (scratch@[4] != 15) [ ret 5; ]
+    if (scratch@[5] != 35) [ ret 6; ]
+    if (scratch@[10] != 35) [ ret 7; ]
+    if (scratch@[15] != 35) [ ret 8; ]
+    ret 0;
+]
+
+fn test_lm_vertical_slice!(scratch) [
+    loop (zi:256 = 0 .. 256) [
+        scratch@[zi] = 0;
+    ]
+    // Single vertical downward line at col 0, subpixel 128
+    // Full row height in row 0: y0 = 0, y1 = 256
+    lm_slice_cord_row!(scratch, 0, 0, 0, 128, 0, 128, 256);
+
+    // Delta Y = 256. sub_x = 128.
+    // delta_a0 = (256 * 128) >> 8 = 128
+    // delta_a1 = (256 * 128) >> 8 = 128
+    if (scratch@[0] != 128) [ ret 1; ]
+    if (scratch@[1] != 128) [ ret 2; ]
+    if (scratch@[2] != 0) [ ret 3; ]
+
+    lm_weft_row!(scratch, 0);
+    // After prefix sum:
+    // col 0: 128 (50% coverage)
+    // col 1: 256 (100% coverage)
+    // col 2..15: 256
+    if (scratch@[0] != 128) [ ret 4; ]
+    if (scratch@[1] != 256) [ ret 5; ]
+    if (scratch@[15] != 256) [ ret 6; ]
+    ret 0;
+]
+
+fn test_lm_commutativity_gate!(scratch1, scratch2) [
+    loop (zi:256 = 0 .. 256) [
+        scratch1@[zi] = 0;
+        scratch2@[zi] = 0;
+    ]
+    // Cord A: downward line at col 1
+    // Cord B: upward line at col 4
+    x0_a = 300;
+    y0_a = 10;
+    x1_a = 300;
+    y1_a = 240;
+
+    x0_b = 1100;
+    y0_b = 250;
+    x1_b = 1100;
+    y1_b = 20;
+
+    // Order 1: A then B
+    lm_pluck_cord!(scratch1, 0, 0, x0_a, y0_a, x1_a, y1_a);
+    lm_pluck_cord!(scratch1, 0, 0, x0_b, y0_b, x1_b, y1_b);
+
+    // Order 2: B then A
+    lm_pluck_cord!(scratch2, 0, 0, x0_b, y0_b, x1_b, y1_b);
+    lm_pluck_cord!(scratch2, 0, 0, x0_a, y0_a, x1_a, y1_a);
+
+    // Verify bit-for-bit commutativity across all 256 lanes
+    loop (ci:256 = 0 .. 256) [
+        v1 = scratch1@[ci];
+        v2 = scratch2@[ci];
+        if (v1 != v2) [
+            ret 1;
+        ]
+    ]
+    ret 0;
+]
+
+fn test_lm_horizontal_sliver!(tape, scratch, cov) [
+    // Sub-pixel horizontal sliver in row 0:
+    // Downward edge at x = 100, upward edge at x = 180 (width = 80 subpixels)
+    tape_len = 2;
+    rgba = 4278190335;
+    row_mask = 1;
+    tx_span = 0; // tile 0..0
+
+    // Cord 0: downward
+    w0_0 = (1 << 56) | rgba;
+    w1_0 = (100 << 32) | 0;
+    w2_0 = (100 << 32) | 256;
+    tape@[0] = w0_0;
+    tape@[1] = w1_0;
+    tape@[2] = w2_0;
+    tape@[3] = row_mask;
+
+    // Cord 1: upward
+    w0_1 = (1 << 56) | rgba;
+    w1_1 = (180 << 32) | 256;
+    w2_1 = (180 << 32) | 0;
+    tape@[4] = w0_1;
+    tape@[5] = w1_1;
+    tape@[6] = w2_1;
+    tape@[7] = row_mask;
+
+    lm_weave_tile!(tape, tape_len, 0, 0, 0, scratch, cov);
+
+    // Analytical expectation:
+    // Pixel 0 coverage = 80 / 256 units
+    // Columns 1..15 coverage = 0 (net flux cancels to 0)
+    cov0 = cov@[0];
+    if (cov0 != 80) [
+        ret 1;
+    ]
+    cov1 = cov@[1];
+    if (cov1 != 0) [
+        ret 2;
+    ]
+    cov15 = cov@[15];
+    if (cov15 != 0) [
+        ret 3;
+    ]
+    ret 0;
+]
+
+fn test_lm_vertical_sliver!(tape, scratch, cov) [
+    // Sub-pixel vertical sliver: spans full pixel col 0 width, but only y = 50..150
+    // Height Delta Y = 100 subpixels out of 256
+    tape_len = 2;
+    rgba = 4278190335;
+    row_mask = 1;
+
+    // Downward edge at x = 0
+    tape@[0] = (1 << 56) | rgba;
+    tape@[1] = (0 << 32) | 50;
+    tape@[2] = (0 << 32) | 150;
+    tape@[3] = row_mask;
+
+    // Upward edge at x = 256
+    tape@[4] = (1 << 56) | rgba;
+    tape@[5] = (256 << 32) | 150;
+    tape@[6] = (256 << 32) | 50;
+    tape@[7] = row_mask;
+
+    lm_weave_tile!(tape, tape_len, 0, 0, 0, scratch, cov);
+
+    cov0 = cov@[0];
+    // Exact analytical area = 100
+    if (cov0 != 100) [
+        ret 1;
+    ]
+    cov1 = cov@[1];
+    if (cov1 != 0) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_lm_diagonal_triangle!(tape, scratch, cov) [
+    // Right triangle covering lower-right half of pixel (0, 0)
+    // Diagonal edge from (0, 0) to (256, 256), downward
+    // Upward vertical edge at x = 256 from 256 to 0
+    tape_len = 2;
+    rgba = 4278190335;
+    row_mask = 1;
+
+    tape@[0] = (1 << 56) | rgba;
+    tape@[1] = (0 << 32) | 0;
+    tape@[2] = (256 << 32) | 256;
+    tape@[3] = row_mask;
+
+    tape@[4] = (1 << 56) | rgba;
+    tape@[5] = (256 << 32) | 256;
+    tape@[6] = (256 << 32) | 0;
+    tape@[7] = row_mask;
+
+    lm_weave_tile!(tape, tape_len, 0, 0, 0, scratch, cov);
+
+    // Exact triangular area = 50% = 128
+    cov0 = cov@[0];
+    if (cov0 != 128) [
+        ret 1;
+    ]
+    cov1 = cov@[1];
+    if (cov1 != 0) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_lm_star_winding_gate!(tape, scratch, cov) [
+    // Closed 5-pointed self-intersecting star in tile (0, 0)
+    // Core center pixel receives winding 2
+    // Non-zero winding -> core pixel is 256
+    // Even-odd winding -> core pixel is 0 (hole)
+    rgba = 4278190335;
+    row_mask = 65535;
+
+    // 5 vertices:
+    // P0: (2048, 200)
+    // P1: (2600, 3600)
+    // P2: (600, 1400)
+    // P3: (3500, 1400)
+    // P4: (1500, 3600)
+    tape@[0] = (1 << 56) | rgba;
+    tape@[1] = (2048 << 32) | 200;
+    tape@[2] = (2600 << 32) | 3600;
+    tape@[3] = row_mask;
+
+    tape@[4] = (1 << 56) | rgba;
+    tape@[5] = (2600 << 32) | 3600;
+    tape@[6] = (600 << 32) | 1400;
+    tape@[7] = row_mask;
+
+    tape@[8] = (1 << 56) | rgba;
+    tape@[9] = (600 << 32) | 1400;
+    tape@[10] = (3500 << 32) | 1400;
+    tape@[11] = row_mask;
+
+    tape@[12] = (1 << 56) | rgba;
+    tape@[13] = (3500 << 32) | 1400;
+    tape@[14] = (1500 << 32) | 3600;
+    tape@[15] = row_mask;
+
+    tape@[16] = (1 << 56) | rgba;
+    tape@[17] = (1500 << 32) | 3600;
+    tape@[18] = (2048 << 32) | 200;
+    tape@[19] = row_mask;
+
+    // 1. Non-Zero Weave
+    lm_weave_tile!(tape, 5, 0, 0, 0, scratch, cov);
+    center_idx = (8 * 16) + 8;
+    cov_nz = cov@[center_idx];
+    if (cov_nz != 256) [
+        ret 1;
+    ]
+
+    // 2. Even-Odd Weave
+    lm_weave_tile!(tape, 5, 0, 0, 1, scratch, cov);
+    cov_eo = cov@[center_idx];
+    if (cov_eo != 0) [
+        ret 2;
+    ]
+    ret 0;
+]
+
+fn test_lm_tile_shading!(cov, tile_words) [
+    // Set up coverage ramp: pixel 0 = 0, pixel 1 = 128, pixel 2 = 256
+    cov@[0] = 0;
+    cov@[1] = 128;
+    cov@[2] = 256;
+
+    fg = 4278190335; // Red: 0xFF0000FF
+    bg = 4294967295; // White: 0xFFFFFFFF
+
+    lm_shade_tile_rgba!(cov, fg, bg, tile_words);
+
+    w0 = tile_words@[0];
+    p0_rgba = w0 & 4294967295;
+    p1_rgba = w0 >> 32;
+
+    // Pixel 0 (coverage 0) must be 100% white (0xFFFFFFFF)
+    if (p0_rgba != 4294967295) [
+        ret 1;
+    ]
+
+    // Pixel 1 (coverage 128) must have green & blue at 127 or 128
+    p1_g = (p1_rgba >> 8) & 255;
+    p1_b = (p1_rgba >> 16) & 255;
+    if (p1_g < 127) [
+        ret 2;
+    ]
+    if (p1_g > 128) [
+        ret 2;
+    ]
+    if (p1_b < 127) [
+        ret 3;
+    ]
+    if (p1_b > 128) [
+        ret 3;
+    ]
+
+    // Pixel 2 (coverage 256) must be pure red (0xFF0000FF)
+    w1 = tile_words@[1];
+    p2_rgba = w1 & 4294967295;
+    p2_r = p2_rgba & 255;
+    p2_g = (p2_rgba >> 8) & 255;
+    p2_b = (p2_rgba >> 16) & 255;
+    if (p2_r != 255) [
+        ret 4;
+    ]
+    if (p2_g != 0) [
+        ret 5;
+    ]
+    if (p2_b != 0) [
+        ret 6;
+    ]
+    ret 0;
+]
+
+fn test_lm_torture_tiles!(tape, scratch, cov) [
+    // Stress test: weave 1,000 tiles with complex intersecting cords
+    rgba = 4278190335;
+    row_mask = 65535;
+    loop (iter:1000 = 0 .. 1000) [
+        tape@[0] = (1 << 56) | rgba;
+        tape@[1] = (500 << 32) | 100;
+        tape@[2] = (3000 << 32) | 3800;
+        tape@[3] = row_mask;
+
+        tape@[4] = (1 << 56) | rgba;
+        tape@[5] = (3000 << 32) | 3800;
+        tape@[6] = (200 << 32) | 3800;
+        tape@[7] = row_mask;
+
+        tape@[8] = (1 << 56) | rgba;
+        tape@[9] = (200 << 32) | 3800;
+        tape@[10] = (500 << 32) | 100;
+        tape@[11] = row_mask;
+
+        lm_weave_tile!(tape, 3, 0, 0, 0, scratch, cov);
+        // Verify no crash and bounds intact
+        cov_val = cov@[128];
+        if (cov_val > 256) [
+            ret 1;
+        ]
+        if (cov_val < 0) [
+            ret 2;
+        ]
+    ]
+    ret 0;
+]
+
+fn test_lm_cord_outside_tile_isolation!(warp_ptr) [
+    // Cord is at x = 2560 (inside Tile 0), from y = 100 to y = 200
+    // Slicing Tile 5 (x_tile = 20480): cord is to the left (x_local < 0)
+    // In a multi-tile grid, Tile 5 must NOT receive a phantom impulse at col 0!
+    loop (i:256 = 0 .. 256) [
+        warp_ptr@[i] = 0;
+    ]
+    lm_slice_cord_row!(warp_ptr, 5, 0, 0, 2560, 100, 2560, 200);
+    col0_val = warp_ptr@[0];
+    if (col0_val != 0) [
+        // FAILED: Phantom impulse leaked into column 0 of tile to the right!
+        ret 1;
+    ]
+    ret 0;
+]
+
+fn test_lm_column_15_spill_conservation!(warp_ptr) [
+    // Sub-pixel cord crossing at column 15 (x = 3968, delta_y = 200)
+    // Energy conservation: Pixel 15 impulse (da0=100) + Terminal carry (da1=100) == delta_y (200)
+    loop (i:272 = 0 .. 272) [
+        warp_ptr@[i] = 0;
+    ]
+    lm_slice_cord_row!(warp_ptr, 0, 0, 0, 3968, 50, 3968, 250);
+    w15 = warp_ptr@[15];
+    if (w15 != 100) [
+        ret 1;
+    ]
+    w_term = warp_ptr@[256];
+    if (w_term != 100) [
+        ret 2;
+    ]
+    row_sum = w15 + w_term;
+    if (row_sum != 200) [
+        ret 3;
+    ]
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+
+    scratch1 = arena_alloc_words!(arena, 272);
+    scratch2 = arena_alloc_words!(arena, 272);
+    cov_buf = arena_alloc_words!(arena, 256);
+    tile_words = arena_alloc_words!(arena, 128);
+    tape = arena_alloc_words!(arena, 64);
+
+    r1 = test_lm_helpers();
+    if (r1 != 0) [ sys_exit!(101); ]
+
+    r2 = test_lm_winding_rules();
+    if (r2 != 0) [ sys_exit!(102); ]
+
+    r3 = test_lm_weft_prefix_sum!(scratch1);
+    if (r3 != 0) [ sys_exit!(103); ]
+
+    r4 = test_lm_vertical_slice!(scratch1);
+    if (r4 != 0) [ sys_exit!(104); ]
+
+    r5 = test_lm_commutativity_gate!(scratch1, scratch2);
+    if (r5 != 0) [ sys_exit!(105); ]
+
+    r6 = test_lm_horizontal_sliver!(tape, scratch1, cov_buf);
+    if (r6 != 0) [ sys_exit!(106); ]
+
+    r7 = test_lm_vertical_sliver!(tape, scratch1, cov_buf);
+    if (r7 != 0) [ sys_exit!(107); ]
+
+    r8 = test_lm_diagonal_triangle!(tape, scratch1, cov_buf);
+    if (r8 != 0) [ sys_exit!(108); ]
+
+    r9 = test_lm_star_winding_gate!(tape, scratch1, cov_buf);
+    if (r9 != 0) [ sys_exit!(109); ]
+
+    r10 = test_lm_tile_shading!(cov_buf, tile_words);
+    if (r10 != 0) [ sys_exit!(110); ]
+
+    r11 = test_lm_torture_tiles!(tape, scratch1, cov_buf);
+    if (r11 != 0) [ sys_exit!(111); ]
+
+    r12 = test_lm_cord_outside_tile_isolation!(scratch1);
+    if (r12 != 0) [ sys_exit!(112); ]
+
+    r13 = test_lm_column_15_spill_conservation!(scratch1);
+    if (r13 != 0) [ sys_exit!(113); ]
+
+    sys_exit!(0);
+]

@@ -1,0 +1,127 @@
+// ==========================================
+// sagr/sys/entry.sinc
+// SAGR Phase 1 Test Entrypoint & Verification
+// ==========================================
+
+fn init_phase1_ppm_path!(path_buf) [
+    path_buf@[0 * 1] = 112;
+    path_buf@[1 * 1] = 104;
+    path_buf@[2 * 1] = 97;
+    path_buf@[3 * 1] = 115;
+    path_buf@[4 * 1] = 101;
+    path_buf@[5 * 1] = 49;
+    path_buf@[6 * 1] = 95;
+    path_buf@[7 * 1] = 103;
+    path_buf@[8 * 1] = 114;
+    path_buf@[9 * 1] = 105;
+    path_buf@[10 * 1] = 100;
+    path_buf@[11 * 1] = 46;
+    path_buf@[12 * 1] = 112;
+    path_buf@[13 * 1] = 112;
+    path_buf@[14 * 1] = 109;
+    path_buf@[15 * 1] = 0;
+    ret 0;
+]
+
+fn make_test_tile!(tile_buf, tx, ty) [
+    px_border = 50 | (180 << 8) | (240 << 16) | (255 << 24);
+    word_border = px_border | (px_border << 32);
+    px_inner_r = (tx * 2) & 255;
+    px_inner_g = (ty * 3) & 255;
+    px_inner_b = 180;
+    px_inner = px_inner_r | (px_inner_g << 8) | (px_inner_b << 16) | (255 << 24);
+    word_inner = px_inner | (px_inner << 32);
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        r_off = r * 8;
+        is_edge_row = 0;
+        if ((r == 0) | (r == 15)) [
+            is_edge_row = 1;
+        ]
+        loop (c:TILE_SCANLINE_WORDS = 0 .. TILE_SCANLINE_WORDS) [
+            idx = r_off + c;
+            if ((is_edge_row == 1) | (c == 0) | (c == 7)) [
+                tile_buf@[idx] = word_border;
+            ] else [
+                tile_buf@[idx] = word_inner;
+            ]
+        ]
+    ]
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+    surface = slsp_create!(arena, 1920, 1080, 0);
+    if (surface == 0) [
+        sys_exit!(2);
+    ]
+    fb_ptr = surface.SLSP_WORD_FB_PTR;
+    mask_ptr = surface.SLSP_WORD_MASK_PTR;
+    tile_buf = arena_alloc_words!(arena, 128);
+    row_scratch = arena_alloc_words!(arena, 720);
+    path_buf = arena_alloc_words!(arena, 4);
+    init_phase1_ppm_path!(path_buf);
+
+    box1_x0 = 160 << 8;
+    box1_y0 = 96 << 8;
+    box1_x1 = 800 << 8;
+    box1_y1 = 480 << 8;
+    slsp_stamp_box!(mask_ptr, box1_x0, box1_y0, box1_x1, box1_y1);
+
+    box2_x0 = 960 << 8;
+    box2_y0 = 320 << 8;
+    box2_x1 = 1760 << 8;
+    box2_y1 = 960 << 8;
+    slsp_stamp_box!(mask_ptr, box2_x0, box2_y0, box2_x1, box2_y1);
+
+    box3_x0 = 840 << 8;
+    box3_y0 = 120 << 8;
+    box3_x1 = 920 << 8;
+    box3_y1 = 200 << 8;
+    slsp_stamp_box!(mask_ptr, box3_x0, box3_y0, box3_x1, box3_y1);
+
+    dirty_tiles_processed = 0;
+    loop (w_idx:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
+        w_val = mask_ptr@[w_idx];
+        if (w_val != 0) [
+            loop (bit_step:64 = 0 .. 64) [
+                if (w_val != 0) [
+                    b_idx = ctz64(w_val);
+                    tile_idx = (w_idx << 6) + b_idx;
+                    ty = tile_idx / 120;
+                    tx = tile_idx - (ty * 120);
+                    make_test_tile!(tile_buf, tx, ty);
+                    slsp_beam_flush_tile!(fb_ptr, tx, ty, 7680, tile_buf~);
+                    dirty_tiles_processed = dirty_tiles_processed + 1;
+                    w_val = blsr64(w_val);
+                ]
+            ]
+        ]
+    ]
+
+    slsp_dump_ppm!(path_buf, fb_ptr, 1920, 1080, 7680, row_scratch);
+
+    slsp_clear_dirty!(mask_ptr);
+    idle_tiles_processed = 0;
+    loop (iw_idx:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
+        iw_val = mask_ptr@[iw_idx];
+        if (iw_val != 0) [
+            idle_tiles_processed = idle_tiles_processed + 1;
+        ]
+    ]
+
+    if (idle_tiles_processed != 0) [
+        sys_exit!(10);
+    ]
+
+    if (dirty_tiles_processed == 0) [
+        sys_exit!(11);
+    ]
+
+    sys_exit!(0);
+]

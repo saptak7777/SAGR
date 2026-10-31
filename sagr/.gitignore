@@ -1,0 +1,16 @@
+# SINC Build Artifacts
+*.safe
+*.elf
+*.o
+*.bin
+*.ppm
+
+# Scratch & Build Directories
+scratch/
+build/
+.cache/
+
+# OS / Editor Artifacts
+.DS_Store
+*~
+*.swp

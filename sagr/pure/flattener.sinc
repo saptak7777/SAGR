@@ -1,0 +1,182 @@
+// ==========================================
+// sagr/pure/flattener.sinc
+// Wang's lzcnt Dyadic Flattener & Row Stamper
+// ==========================================
+
+fn fl_octagonal_norm(dx, dy) [
+    n = bo_octagonal_norm(dx, dy);
+    ret n;
+]
+
+fn fl_compute_depth_k(l_norm) [
+    l_tol = l_norm >> 6;
+    if (l_tol == 0) [
+        ret 0;
+    ]
+    lz = lzcnt64(l_tol);
+    diff = 63 - lz;
+    if (diff < 0) [
+        ret 0;
+    ]
+    k = diff >> 1;
+    if (k > 7) [
+        ret 7;
+    ]
+    ret k;
+]
+
+fn fl_make_row_mask(ty_lo, ty_hi) [
+    if (ty_lo > 63) [
+        ret 0;
+    ]
+    if (ty_hi > 63) [
+        ty_hi = 63;
+    ]
+    if (ty_hi == 63) [
+        all_bits = 0 - 1;
+        if (ty_lo == 0) [
+            ret all_bits;
+        ]
+        one_lo_63 = 1 << ty_lo;
+        mask_lo_63 = one_lo_63 - 1;
+        res_63 = all_bits ^ mask_lo_63;
+        ret res_63;
+    ]
+    hi_shift = ty_hi + 1;
+    one_hi = 1 << hi_shift;
+    mask_hi = one_hi - 1;
+    one_lo = 1 << ty_lo;
+    mask_lo = one_lo - 1;
+    res = mask_hi ^ mask_lo;
+    ret res;
+]
+
+fn fl_eval_pt(p0, delta1, delta2, i, k) [
+    if (k == 0) [
+        if (i == 0) [
+            ret p0;
+        ]
+        p1_res = p0 + delta1;
+        res_k0 = p1_res + delta2;
+        ret res_k0;
+    ]
+    prod1 = i * delta1;
+    term1 = prod1 >> k;
+    i_sq = i * i;
+    prod2 = i_sq * delta2;
+    k2 = k << 1;
+    term2 = prod2 >> k2;
+    sum1 = p0 + term1;
+    res = sum1 + term2;
+    ret res;
+]
+
+fn fl_emit_cord_raw!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
+    ty0 = y0 >> 12;
+    ty1 = y1 >> 12;
+    ty_lo = ty0;
+    ty_hi = ty1;
+    if (ty1 < ty0) [
+        ty_lo = ty1;
+        ty_hi = ty0;
+    ]
+    row_mask = fl_make_row_mask(ty_lo, ty_hi);
+
+    tx0 = x0 >> 12;
+    tx1 = x1 >> 12;
+    tx_lo = tx0;
+    tx_hi = tx1;
+    if (tx1 < tx0) [
+        tx_lo = tx1;
+        tx_hi = tx0;
+    ]
+    tx_hi_clamped = tx_hi & 255;
+    tx_span = (tx_lo << 8) | tx_hi_clamped;
+
+    idx = out_idx_ptr@[0];
+    off = idx * 4;
+    tag_op = 1 << 56;
+    span_packed = tx_span << 32;
+    rgba_masked = rgba & 4294967295;
+    tag_combo = tag_op | span_packed;
+    w0 = tag_combo | rgba_masked;
+
+    x0_sh = x0 << 32;
+    y0_m = y0 & 4294967295;
+    w1 = x0_sh | y0_m;
+
+    x1_sh = x1 << 32;
+    y1_m = y1 & 4294967295;
+    w2 = x1_sh | y1_m;
+
+    w3 = row_mask;
+
+    out_tape@[off] = w0;
+    out_tape@[(off + 1)] = w1;
+    out_tape@[(off + 2)] = w2;
+    out_tape@[(off + 3)] = w3;
+
+    out_idx_ptr@[0] = idx + 1;
+    ret 0;
+]
+
+fn fl_flatten_quad!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba) [
+    x1_two = x1 << 1;
+    dd_x = (x0 - x1_two) + x2;
+
+    y1_two = y1 << 1;
+    dd_y = (y0 - y1_two) + y2;
+
+    l_norm = fl_octagonal_norm(dd_x, dd_y);
+    k = fl_compute_depth_k(l_norm);
+    n_segs = 1 << k;
+
+    dx_01 = x1 - x0;
+    delta1_x = dx_01 << 1;
+    delta2_x = dd_x;
+
+    dy_01 = y1 - y0;
+    delta1_y = dy_01 << 1;
+    delta2_y = dd_y;
+
+    cur_x = x0;
+    cur_y = y0;
+
+    loop (step:128 = 1 .. (n_segs + 1)) [
+        nxt_x = fl_eval_pt(x0, delta1_x, delta2_x, step, k);
+        nxt_y = fl_eval_pt(y0, delta1_y, delta2_y, step, k);
+        fl_emit_cord_raw!(out_tape, out_idx_ptr, cur_x, cur_y, nxt_x, nxt_y, rgba);
+        cur_x = nxt_x;
+        cur_y = nxt_y;
+    ]
+    ret 0;
+]
+
+fn fl_flatten_tape!(in_tape, in_count, out_tape, out_idx_ptr) [
+    loop (ci:10000 = 0 .. in_count) [
+        off = ci * 4;
+        w0 = in_tape@[off];
+        w1 = in_tape@[(off + 1)];
+        w2 = in_tape@[(off + 2)];
+        w3 = in_tape@[(off + 3)];
+
+        op = w0 >> 56;
+        rgba = w0 & 4294967295;
+
+        x0 = w1 >> 32;
+        y0 = w1 & 4294967295;
+        x1 = w2 >> 32;
+        y1 = w2 & 4294967295;
+
+        if (op == 1) [
+            fl_emit_cord_raw!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba);
+        ]
+
+        if (op == 2) [
+            x2 = w3 >> 32;
+            y2 = w3 & 4294967295;
+            fl_flatten_quad!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba);
+        ]
+    ]
+    ret out_idx_ptr@[0];
+]
