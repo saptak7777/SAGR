@@ -9,12 +9,10 @@ const VF_FNV_PRIME = 1099511628211;
 
 fn vf_hash_words(words_ptr, count) [
     h = VF_FNV_OFFSET;
-    i = 0;
-    loop (step:100000 = 0 .. count) [
+    loop (i:100000 = 0 .. count) [
         w = words_ptr@[i];
         xor_val = h ^ w;
         h = xor_val * VF_FNV_PRIME;
-        i = i + 1;
     ]
     ret h;
 ]
@@ -179,11 +177,9 @@ fn vf_render_scene_9!(tape, mask_ptr) [
 
 fn vf_render_scene_10!(dst_words, src_words) [
     // Scene 10: 64-lane Source-Over linear compositor
-    w = 0;
-    loop (step:TILE_WORDS = 0 .. TILE_WORDS) [
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
         dst_words@[w] = 4294967295; // White
         src_words@[w] = 2147483776; // 50% Red
-        w = w + 1;
     ]
     hd_composite_source_over!(dst_words, src_words);
     ret 0;
@@ -191,19 +187,15 @@ fn vf_render_scene_10!(dst_words, src_words) [
 
 fn vf_render_scene_11!(atlas_buf, tile_words) [
     // Scene 11: MSDF typography glyph shading
-    w = 0;
-    loop (step:TILE_WORDS = 0 .. TILE_WORDS) [
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
         tile_words@[w] = 0;
-        w = w + 1;
     ]
-    ti = 0;
     val_b = 200 << 16;
     val_g = 200 << 8;
     val_rg = 200 | val_g;
     val = val_rg | val_b;
-    loop (step:TILE_PIXELS = 0 .. TILE_PIXELS) [
+    loop (ti:TILE_PIXELS = 0 .. TILE_PIXELS) [
         atlas_buf@[ti] = val;
-        ti = ti + 1;
     ]
     fg = 4278190335; // Red
     msdf_render_glyph_tile!(atlas_buf, 16, 0, 0, 16, 16, 0, 0, 256, fg, tile_words);
@@ -212,10 +204,8 @@ fn vf_render_scene_11!(atlas_buf, tile_words) [
 
 fn vf_render_scene_12!(mask_ptr) [
     // Scene 12: Blinking cursor dirty-tile minimal update (2 tiles dirty, rest clean)
-    zi = 0;
-    loop (step:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
+    loop (zi:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
         mask_ptr@[zi] = 0;
-        zi = zi + 1;
     ]
     hd_stamp_tile!(mask_ptr, 10, 20);
     hd_stamp_tile!(mask_ptr, 10, 21);

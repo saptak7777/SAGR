@@ -4,20 +4,14 @@
 // ==========================================
 
 fn lm_abs(v) [
-    if (v < 0) [
-        ret 0 - v;
-    ]
-    ret v;
+    res = bo_abs(v);
+    ret res;
 ]
 
 fn lm_clamp(val, lo, hi) [
-    if (val < lo) [
-        ret lo;
-    ]
-    if (val > hi) [
-        ret hi;
-    ]
-    ret val;
+    c_lo = lm_max(val, lo);
+    res = lm_min(c_lo, hi);
+    ret res;
 ]
 
 fn lm_min(a, b) [
@@ -37,25 +31,17 @@ fn lm_max(a, b) [
 ]
 
 fn lm_resolve_nonzero(w) [
-    if (w < 0) [
-        w = 0 - w;
-    ]
-    if (w > 256) [
-        ret 256;
-    ]
-    ret w;
+    aw = bo_abs(w);
+    res = lm_min(aw, 256);
+    ret res;
 ]
 
 fn lm_resolve_evenodd(w) [
-    if (w < 0) [
-        w = 0 - w;
-    ]
-    m = w & 511;
-    if (m > 256) [
-        fold = 512 - m;
-        ret fold;
-    ]
-    ret m;
+    aw = bo_abs(w);
+    m = aw & 511;
+    fold = 512 - m;
+    res = lm_min(m, fold);
+    ret res;
 ]
 
 fn lm_weft_row!(warp_scratch, row) [
@@ -222,14 +208,11 @@ fn lm_weave_tile_backdrop!(tape, tape_len, tile_x, tile_y, winding_rule, in_back
                 tx_span = w0_sh & 65535;
                 tx_lo = tx_span >> 8;
                 tx_hi = tx_span & 255;
-                in_x = 1;
-                if (tile_x < tx_lo) [
-                    in_x = 0;
-                ]
-                if (tile_x > tx_hi) [
-                    in_x = 0;
-                ]
-                if (in_x == 1) [
+                dx_lo = tile_x - tx_lo;
+                dx_hi = tx_hi - tile_x;
+                oob_x = dx_lo | dx_hi;
+                x_sign = oob_x >> 63;
+                if (x_sign == 0) [
                     x0 = w1 >> 32;
                     y0 = w1 & 4294967295;
                     x1 = w2 >> 32;

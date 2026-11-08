@@ -15,9 +15,6 @@ fn fl_compute_depth_k(l_norm) [
     ]
     lz = lzcnt64(l_tol);
     diff = 63 - lz;
-    if (diff < 0) [
-        ret 0;
-    ]
     k = diff >> 1;
     if (k > 7) [
         ret 7;
@@ -32,22 +29,11 @@ fn fl_make_row_mask(ty_lo, ty_hi) [
     if (ty_hi > 63) [
         ty_hi = 63;
     ]
-    if (ty_hi == 63) [
-        all_bits = 0 - 1;
-        if (ty_lo == 0) [
-            ret all_bits;
-        ]
-        one_lo_63 = 1 << ty_lo;
-        mask_lo_63 = one_lo_63 - 1;
-        res_63 = all_bits ^ mask_lo_63;
-        ret res_63;
-    ]
-    hi_shift = ty_hi + 1;
-    one_hi = 1 << hi_shift;
-    mask_hi = one_hi - 1;
-    one_lo = 1 << ty_lo;
-    mask_lo = one_lo - 1;
-    res = mask_hi ^ mask_lo;
+    all_bits = 0 - 1;
+    mask_lo = all_bits << ty_lo;
+    two_hi = 2 << ty_hi;
+    mask_hi = two_hi - 1;
+    res = mask_hi & mask_lo;
     ret res;
 ]
 
@@ -74,24 +60,23 @@ fn fl_eval_pt(p0, delta1, delta2, i, k) [
 fn fl_emit_cord_raw!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
     ty0 = y0 >> 12;
     ty1 = y1 >> 12;
-    ty_lo = ty0;
-    ty_hi = ty1;
-    if (ty1 < ty0) [
-        ty_lo = ty1;
-        ty_hi = ty0;
-    ]
+    dy = ty0 - ty1;
+    my = dy >> 63;
+    del_y = dy & my;
+    ty_lo = ty1 + del_y;
+    ty_hi = ty0 - del_y;
     row_mask = fl_make_row_mask(ty_lo, ty_hi);
 
     tx0 = x0 >> 12;
     tx1 = x1 >> 12;
-    tx_lo = tx0;
-    tx_hi = tx1;
-    if (tx1 < tx0) [
-        tx_lo = tx1;
-        tx_hi = tx0;
-    ]
+    dx = tx0 - tx1;
+    mx = dx >> 63;
+    del_x = dx & mx;
+    tx_lo = tx1 + del_x;
+    tx_hi = tx0 - del_x;
     tx_hi_clamped = tx_hi & 255;
-    tx_span = (tx_lo << 8) | tx_hi_clamped;
+    tx_lo_sh = tx_lo << 8;
+    tx_span = tx_lo_sh | tx_hi_clamped;
 
     idx = out_idx_ptr@[0];
     off = idx * 4;
@@ -122,10 +107,12 @@ fn fl_emit_cord_raw!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
 
 fn fl_flatten_quad!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba) [
     x1_two = x1 << 1;
-    dd_x = (x0 - x1_two) + x2;
+    diff_x = x0 - x1_two;
+    dd_x = diff_x + x2;
 
     y1_two = y1 << 1;
-    dd_y = (y0 - y1_two) + y2;
+    diff_y = y0 - y1_two;
+    dd_y = diff_y + y2;
 
     l_norm = fl_octagonal_norm(dd_x, dd_y);
     k = fl_compute_depth_k(l_norm);
@@ -142,7 +129,8 @@ fn fl_flatten_quad!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba) [
     cur_x = x0;
     cur_y = y0;
 
-    loop (step:128 = 1 .. (n_segs + 1)) [
+    step_limit = n_segs + 1;
+    loop (step:128 = 1 .. step_limit) [
         nxt_x = fl_eval_pt(x0, delta1_x, delta2_x, step, k);
         nxt_y = fl_eval_pt(y0, delta1_y, delta2_y, step, k);
         fl_emit_cord_raw!(out_tape, out_idx_ptr, cur_x, cur_y, nxt_x, nxt_y, rgba);

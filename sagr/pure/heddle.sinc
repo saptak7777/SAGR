@@ -57,10 +57,8 @@ fn hd_is_occluded(mask_ptr, tx_lo, ty_lo, tx_hi, ty_hi) [
 ]
 
 fn hd_reap_shutter!(tape, tape_len, shutter_mask) [
-    zi = 0;
-    loop (step:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
+    loop (zi:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
         shutter_mask@[zi] = 0;
-        zi = zi + 1;
     ]
 
     reaped_count = 0;
@@ -104,10 +102,8 @@ fn hd_reap_shutter!(tape, tape_len, shutter_mask) [
 ]
 
 fn hd_backdrop_init!(backdrop_buf) [
-    r = 0;
-    loop (step:TILE_DIM = 0 .. TILE_DIM) [
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
         backdrop_buf@[r] = 0;
-        r = r + 1;
     ]
     ret 0;
 ]
@@ -117,10 +113,8 @@ fn hd_is_solid_interior(active_cords, backdrop_buf) [
         ret 0;
     ]
     loop (r:TILE_DIM = 0 .. TILE_DIM) [
-        bd = backdrop_buf@[r];
-        if (bd < 0) [
-            bd = 0 - bd;
-        ]
+        raw_bd = backdrop_buf@[r];
+        bd = bo_abs(raw_bd);
         if (bd < 256) [
             ret 0;
         ]
@@ -132,10 +126,8 @@ fn hd_broadcast_solid!(tile_words, solid_rgba) [
     hi = solid_rgba << 32;
     lo = solid_rgba & 4294967295;
     word_val = hi | lo;
-    w = 0;
-    loop (step:TILE_WORDS = 0 .. TILE_WORDS) [
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
         tile_words@[w] = word_val;
-        w = w + 1;
     ]
     ret 0;
 ]
