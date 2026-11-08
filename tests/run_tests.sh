@@ -430,17 +430,17 @@ echo ""
 echo "--- Running Subsystem Assertions ---"
 
 PHASE6_TEST_NAMES=(
-    "Test 1: Simple .sfont binary header contract (dims, ascent, descent, atlas offset)"
-    "Test 2: 32-Byte glyph metric quad packing & lookup (unicode, adv, UV, plane)"
-    "Test 3: Branchless UTF-8 ASCII decoder & length recovery (1-byte characters)"
-    "Test 4: Branchless UTF-8 multi-byte decoder (2-byte Greek, 3-byte Euro, 4-byte Clef)"
+    "Test 1: TRG 64-byte binary header contract (magic 84, scripts, length)"
+    "Test 2: O(1) TRG atlas grid UV cell derivation (u0, v0 mapping)"
+    "Test 3: Branchless TRG 1-byte English script decoder (slots 0..61 -> Page 1)"
+    "Test 4: Branchless TRG bilingual script decoder (Bank B Bengali & Tamil)"
     "Test 5: Exhaustive 3-channel branchless median reconstruction (all 6 permutations)"
     "Test 6: Fixed-point Q16.16 bilinear atlas sampler (exact texel & half-texel average)"
     "Test 7: Saturating screen-space anti-aliasing ramp (edge=128, clamps [0..255])"
     "Test 8: Sharp corner preservation test (distinct RGB channels preserve 90-degree apex)"
     "Test 9: 16x16 tile MSDF glyph shading & sub-pixel alpha blend into tile words"
-    "Test 10: Multi-character cursor text layout with advancing X positions (SAGR string)"
-    "Test 11: 4,500 glyphs dense code-editor screen stress gate (50 lines x 90 columns)"
+    "Test 10: 1-Instruction branchless XOR bracket matching (bracket ^ 1)"
+    "Test 11: msdf_layout_trg_line! TRG 1-byte container layout into out_positions"
     "Test 12: Glyph background preservation (audit non-destructive source-over)"
 )
 

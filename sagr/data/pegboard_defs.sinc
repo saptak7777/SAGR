@@ -17,3 +17,13 @@ const PB_CANVAS_H    = 276480;
 const PB_ONE_Q16     = 65536;
 
 const PB_QUAD_WORDS  = 4;
+
+// TRG (Typed Relative Grid) Sovereign Ingestion Constants
+const TRG_PAYLOAD_OFFSET = 64;
+const TRG_MASK_APERTURE  = 112;
+const TRG_CARRY_ADD      = 16;
+const TRG_MAGIC_BYTE     = 84;
+const TRG_SCRIPT_ENGLISH = 256;
+const TRG_SCRIPT_BENGALI = 512;
+const TRG_SCRIPT_HINDI   = 768;
+const TRG_SCRIPT_TAMIL   = 1024;

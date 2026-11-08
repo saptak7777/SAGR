@@ -4,6 +4,7 @@
 *.o
 *.bin
 !examples/editor/font_terminus.bin
+!examples/editor/font_trg_terminus.bin
 sagr_bin
 test_*_bin
 
@@ -27,6 +28,8 @@ build/
 dist/
 .cache/
 docs/
+__pycache__/
+*.pyc
 
 # OS & Editor Artifacts
 .DS_Store

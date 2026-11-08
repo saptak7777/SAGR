@@ -1,0 +1,817 @@
+// ==============================================================================
+// tests/test_battle.sinc
+// SAGR Sovereign Battle-Testing & Adversarial Stress Suite
+// ==============================================================================
+
+const CANARY_MAGIC_PRE  = -3817748707784000444; // 0xCBADBABE11223344
+const CANARY_MAGIC_POST = -2401053088876218488; // 0xDEEDBEEF55667788
+
+// ------------------------------------------------------------------------------
+// SECTION 1: GEOMETRIC ADVERSARIAL & BOUNDARY STRESS
+// ------------------------------------------------------------------------------
+
+fn test_geo_zero_length!(scratch) [
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        scratch@[i] = 0;
+    ]
+    // Zero-length cord: (1000, 100) -> (1000, 100)
+    lm_slice_cord_row!(scratch, 0, 0, 0, 1000, 100, 1000, 100);
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        if (scratch@[i] != 0) [ ret 1; ]
+    ]
+    ret 0;
+]
+
+fn test_geo_horizontal_line!(scratch) [
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        scratch@[i] = 0;
+    ]
+    // Purely horizontal line across full tile: (0, 128) -> (4096, 128)
+    lm_slice_cord_row!(scratch, 0, 0, 0, 0, 128, 4096, 128);
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        if (scratch@[i] != 0) [ ret 1; ]
+    ]
+    ret 0;
+]
+
+fn test_geo_cancellation!(scratch) [
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        scratch@[i] = 0;
+    ]
+    // Cord A: downward diagonal from (200, 10) to (1800, 240)
+    lm_pluck_cord!(scratch, 0, 0, 200, 10, 1800, 240);
+    // Cord B: exact opposite upward diagonal from (1800, 240) to (200, 10)
+    lm_pluck_cord!(scratch, 0, 0, 1800, 240, 200, 10);
+
+    // 1. Total area sum must be 0 (exact conservation)
+    total_area = 0;
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        v = scratch@[i];
+        total_area = total_area + v;
+        if (v < 0) [ v = 0 - v; ]
+        if (v > 2) [ ret 1; ]
+    ]
+    if (total_area != 0) [ ret 2; ]
+
+    // 2. Net exit flux must be 0
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        lm_weft_row!(scratch, r);
+        last_col = (r * 16) + 15;
+        term_idx = 256 + r;
+        exit_flux = scratch@[last_col] + scratch@[term_idx];
+        if (exit_flux != 0) [ ret 3; ]
+    ]
+    ret 0;
+]
+
+fn test_geo_boundary_vertical_zero!(scratch) [
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        scratch@[i] = 0;
+    ]
+    // Vertical cord at x = 0 (left edge of Tile 0), full row 0 height (y = 0..256)
+    lm_slice_cord_row!(scratch, 0, 0, 0, 0, 0, 0, 256);
+    lm_weft_row!(scratch, 0);
+
+    // After prefix sum, all columns 0..15 must have 100% coverage (256 units)
+    loop (c:TILE_DIM = 0 .. TILE_DIM) [
+        if (scratch@[c] != 256) [ ret 1; ]
+    ]
+    // Row carry slot must be 0
+    if (scratch@[256] != 0) [ ret 2; ]
+    ret 0;
+]
+
+fn test_geo_boundary_vertical_hi!(scratch) [
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        scratch@[i] = 0;
+    ]
+    // Vertical cord at x = 4096 (right edge of Tile 0), full row 0 height (y = 0..256)
+    lm_slice_cord_row!(scratch, 0, 0, 0, 4096, 0, 4096, 256);
+
+    // Columns 0..15 inside Tile 0 must remain 0
+    loop (c:TILE_DIM = 0 .. TILE_DIM) [
+        if (scratch@[c] != 0) [ ret 1; ]
+    ]
+    // Carry slot 256 must receive the full 256 delta_y
+    if (scratch@[256] != 256) [ ret 2; ]
+    ret 0;
+]
+
+fn test_geo_subpixel_micro!(scratch) [
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        scratch@[i] = 0;
+    ]
+    // Micro cord: 1 sub-pixel delta (dx = 1, dy = 1)
+    lm_slice_cord_row!(scratch, 0, 0, 0, 100, 100, 101, 101);
+    // Area must be non-zero and properly bounded
+    c0 = scratch@[0];
+    if (c0 < 0) [ ret 1; ]
+    if (c0 > 256) [ ret 2; ]
+    ret 0;
+]
+
+fn test_geo_clipping_bounds!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+
+    // Line 1: fully above canvas
+    pb_clip_line!(tape, idx_ptr, -5000, -2000, 10000, -100, 4294967295);
+    if (idx_ptr@[0] != 0) [ ret 1; ]
+
+    // Line 2: fully below canvas
+    pb_clip_line!(tape, idx_ptr, 0, 300000, 10000, 350000, 4294967295);
+    if (idx_ptr@[0] != 0) [ ret 2; ]
+
+    // Line 3: Crossing top canvas boundary (y0 = -200 to y1 = +200 at x = 1000)
+    pb_clip_line!(tape, idx_ptr, 1000, -200, 1000, 200, 4294967295);
+    if (idx_ptr@[0] != 1) [ ret 3; ]
+    w1 = tape@[1];
+    y0_clipped = w1 & 4294967295;
+    if (y0_clipped != 0) [ ret 4; ]
+
+    // Line 4: Crossing bottom canvas boundary (y0 = 276400 to y1 = 276600)
+    pb_clip_line!(tape, idx_ptr, 1000, 276400, 1000, 276600, 4294967295);
+    if (idx_ptr@[0] != 2) [ ret 5; ]
+    w2 = tape@[6];
+    y1_clipped = w2 & 4294967295;
+    if (y1_clipped != PB_CANVAS_H) [ ret 6; ]
+
+    // Line 5: Giant diagonal traversing entire canvas from (-50000, -50000) to (600000, 400000)
+    pb_clip_line!(tape, idx_ptr, -50000, -50000, 600000, 400000, 4294967295);
+    if (idx_ptr@[0] != 3) [ ret 7; ]
+    w1_giant = tape@[9];
+    w2_giant = tape@[10];
+    gx0 = w1_giant >> 32;
+    gy0 = w1_giant & 4294967295;
+    gx1 = w2_giant >> 32;
+    gy1 = w2_giant & 4294967295;
+    if (gx0 < 0) [ ret 8; ]
+    if (gy0 < 0) [ ret 9; ]
+    if (gx1 > PB_CANVAS_W) [ ret 10; ]
+    if (gy1 > PB_CANVAS_H) [ ret 11; ]
+    ret 0;
+]
+
+fn test_geo_nyquist_moire_grid!(tape, scratch, cov) [
+    idx_ptr = tape + 4096;
+    idx_ptr@[0] = 0;
+    // 8 vertical bars of width 1 pixel across Tile 0
+    loop (b:8 = 0 .. 8) [
+        x0 = b * 512;
+        x1 = x0 + 256;
+        fl_emit_cord_raw!(tape, idx_ptr, x0, 0, x0, 4096, 4294967295);
+        fl_emit_cord_raw!(tape, idx_ptr, x1, 4096, x1, 0, 4294967295);
+    ]
+    cords_count = idx_ptr@[0];
+    lm_weave_tile!(tape, cords_count, 0, 0, 0, scratch, cov);
+
+    // Audit every row: alternating 256 and 0
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        row_base = r * 16;
+        loop (b:8 = 0 .. 8) [
+            even_col = b * 2;
+            odd_col = even_col + 1;
+            even_idx = row_base + even_col;
+            odd_idx = row_base + odd_col;
+            if (cov@[even_idx] != 256) [ ret 1; ]
+            if (cov@[odd_idx] != 0) [ ret 2; ]
+        ]
+    ]
+    ret 0;
+]
+
+// ------------------------------------------------------------------------------
+// SECTION 2: DISCRETE GREEN'S THEOREM & LOOM AREA CONSERVATION
+// ------------------------------------------------------------------------------
+
+fn test_cons_closed_triangle!(scratch) [
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        scratch@[i] = 0;
+    ]
+    // Closed right triangle inside Tile 0:
+    lm_pluck_cord!(scratch, 0, 0, 500, 500, 500, 3500);
+    lm_pluck_cord!(scratch, 0, 0, 500, 3500, 3500, 3500);
+    lm_pluck_cord!(scratch, 0, 0, 3500, 3500, 500, 500);
+
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        lm_weft_row!(scratch, r);
+        row_base = r * 16;
+        last_col = row_base + 15;
+        term_idx = 256 + r;
+        exit_flux = scratch@[last_col] + scratch@[term_idx];
+        if (exit_flux != 0) [ ret 1; ]
+    ]
+    ret 0;
+]
+
+fn test_cons_multitile_horizontal_propagation!(tape, scratch, cov, bd_buf) [
+    // Box spanning from x = 1000 (Tile 0) to x = 9000 (Tile 2, x_local = 808)
+    idx_ptr = tape + 4096;
+    idx_ptr@[0] = 0;
+    fl_emit_cord_raw!(tape, idx_ptr, 1000, 0, 1000, 4096, 4294967295);
+    fl_emit_cord_raw!(tape, idx_ptr, 9000, 4096, 9000, 0, 4294967295);
+
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        bd_buf@[r] = 0;
+    ]
+
+    // Weave Tile 0 (x = 0..4096)
+    lm_weave_tile_backdrop!(tape, 2, 0, 0, 0, bd_buf, bd_buf, scratch, cov);
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        if (bd_buf@[r] != 256) [ ret 1; ]
+    ]
+
+    // Weave Tile 1 (x = 4096..8192, full interior)
+    lm_weave_tile_backdrop!(tape, 2, 1, 0, 0, bd_buf, bd_buf, scratch, cov);
+    loop (p:TILE_PIXELS = 0 .. TILE_PIXELS) [
+        if (cov@[p] != 256) [ ret 2; ]
+    ]
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        if (bd_buf@[r] != 256) [ ret 3; ]
+    ]
+
+    // Weave Tile 2 (x = 8192..12288, contains closing right edge at 9000 -> x_local = 808)
+    lm_weave_tile_backdrop!(tape, 2, 2, 0, 0, bd_buf, bd_buf, scratch, cov);
+    if (cov@[0] != 256) [ ret 4; ]
+    if (cov@[1] != 256) [ ret 5; ]
+    if (cov@[2] != 256) [ ret 6; ]
+    if (cov@[4] != 0) [ ret 7; ]
+    if (cov@[15] != 0) [ ret 8; ]
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        if (bd_buf@[r] != 0) [ ret 9; ]
+    ]
+
+    // Weave Tile 3 (idle tile beyond polygon)
+    lm_weave_tile_backdrop!(tape, 2, 3, 0, 0, bd_buf, bd_buf, scratch, cov);
+    loop (p:TILE_PIXELS = 0 .. TILE_PIXELS) [
+        if (cov@[p] != 0) [ ret 10; ]
+    ]
+    ret 0;
+]
+
+fn test_cons_permutations_commutativity!(scratch1, scratch2, scratch3) [
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        scratch1@[i] = 0;
+        scratch2@[i] = 0;
+        scratch3@[i] = 0;
+    ]
+
+    // 4 non-trivial cord pairs:
+    x0_1 = 300; y0_1 = 20; x1_1 = 800; y1_1 = 200;
+    x0_2 = 1200; y0_2 = 50; x1_2 = 1500; y1_2 = 250;
+    x0_3 = 2500; y0_3 = 220; x1_3 = 2000; y1_3 = 30;
+    x0_4 = 3800; y0_4 = 240; x1_4 = 3200; y1_4 = 10;
+
+    // Order 1: 1, 2, 3, 4
+    lm_pluck_cord!(scratch1, 0, 0, x0_1, y0_1, x1_1, y1_1);
+    lm_pluck_cord!(scratch1, 0, 0, x0_2, y0_2, x1_2, y1_2);
+    lm_pluck_cord!(scratch1, 0, 0, x0_3, y0_3, x1_3, y1_3);
+    lm_pluck_cord!(scratch1, 0, 0, x0_4, y0_4, x1_4, y1_4);
+
+    // Order 2: 4, 3, 2, 1 (reverse)
+    lm_pluck_cord!(scratch2, 0, 0, x0_4, y0_4, x1_4, y1_4);
+    lm_pluck_cord!(scratch2, 0, 0, x0_3, y0_3, x1_3, y1_3);
+    lm_pluck_cord!(scratch2, 0, 0, x0_2, y0_2, x1_2, y1_2);
+    lm_pluck_cord!(scratch2, 0, 0, x0_1, y0_1, x1_1, y1_1);
+
+    // Order 3: 2, 4, 1, 3 (permuted)
+    lm_pluck_cord!(scratch3, 0, 0, x0_2, y0_2, x1_2, y1_2);
+    lm_pluck_cord!(scratch3, 0, 0, x0_4, y0_4, x1_4, y1_4);
+    lm_pluck_cord!(scratch3, 0, 0, x0_1, y0_1, x1_1, y1_1);
+    lm_pluck_cord!(scratch3, 0, 0, x0_3, y0_3, x1_3, y1_3);
+
+    // Audit 100% bit-for-bit commutativity across all 272 warp lanes
+    loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+        v1 = scratch1@[i];
+        v2 = scratch2@[i];
+        v3 = scratch3@[i];
+        if (v1 != v2) [ ret 1; ]
+        if (v1 != v3) [ ret 2; ]
+    ]
+    ret 0;
+]
+
+fn test_cons_subpixel_monotonicity!(scratch) [
+    loop (step:17 = 0 .. 17) [
+        sub_x = 256 + (step * 16);
+        loop (i:LOOM_WARP_SCRATCH_WORDS = 0 .. LOOM_WARP_SCRATCH_WORDS) [
+            scratch@[i] = 0;
+        ]
+        lm_slice_cord_row!(scratch, 0, 0, 0, sub_x, 0, sub_x, 256);
+        lm_weft_row!(scratch, 0);
+
+        cov0 = scratch@[0];
+        cov1 = scratch@[1];
+        cov2 = scratch@[2];
+
+        if (cov0 != 0) [ ret 1; ]
+        expected_cov1 = 256 - (step * 16);
+        if (cov1 != expected_cov1) [ ret 2; ]
+        if (cov2 != 256) [ ret 3; ]
+    ]
+    ret 0;
+]
+
+fn test_cons_high_winding() [
+    nz4 = lm_resolve_nonzero(1024);
+    eo4 = lm_resolve_evenodd(1024);
+    if (nz4 != 256) [ ret 1; ]
+    if (eo4 != 0) [ ret 2; ]
+
+    nz3 = lm_resolve_nonzero(768);
+    eo3 = lm_resolve_evenodd(768);
+    if (nz3 != 256) [ ret 3; ]
+    if (eo3 != 256) [ ret 4; ]
+
+    nz_neg = lm_resolve_nonzero(0 - 768);
+    eo_neg = lm_resolve_evenodd(0 - 768);
+    if (nz_neg != 256) [ ret 5; ]
+    if (eo_neg != 256) [ ret 6; ]
+    ret 0;
+]
+
+fn test_cons_bowtie_winding!(tape, scratch, cov) [
+    idx_ptr = tape + 4096;
+    idx_ptr@[0] = 0;
+    // Bowtie: (500, 500) -> (3500, 3500) -> (500, 3500) -> (3500, 500) -> (500, 500)
+    fl_emit_cord_raw!(tape, idx_ptr, 500, 500, 3500, 3500, 4294967295);
+    fl_emit_cord_raw!(tape, idx_ptr, 3500, 3500, 500, 3500, 4294967295);
+    fl_emit_cord_raw!(tape, idx_ptr, 500, 3500, 3500, 500, 4294967295);
+    fl_emit_cord_raw!(tape, idx_ptr, 3500, 500, 500, 500, 4294967295);
+    cords_count = idx_ptr@[0];
+
+    // Non-zero winding
+    lm_weave_tile!(tape, cords_count, 0, 0, 0, scratch, cov);
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        last_col = (r * 16) + 15;
+        term_idx = 256 + r;
+        exit_flux = scratch@[last_col] + scratch@[term_idx];
+        if (exit_flux != 0) [ ret 1; ]
+    ]
+
+    // Even-odd winding
+    lm_weave_tile!(tape, cords_count, 0, 0, 1, scratch, cov);
+    loop (r:TILE_DIM = 0 .. TILE_DIM) [
+        last_col = (r * 16) + 15;
+        term_idx = 256 + r;
+        exit_flux = scratch@[last_col] + scratch@[term_idx];
+        if (exit_flux != 0) [ ret 2; ]
+    ]
+    ret 0;
+]
+
+// ------------------------------------------------------------------------------
+// SECTION 3: WANG DYADIC FLATTENER & BÉZIER EXTREMITIES
+// ------------------------------------------------------------------------------
+
+fn test_flat_coincident!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    fl_flatten_quad!(tape, idx_ptr, 100, 100, 100, 100, 100, 100, 4294967295);
+    if (idx_ptr@[0] != 1) [ ret 1; ]
+    ret 0;
+]
+
+fn test_flat_collinear!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    fl_flatten_quad!(tape, idx_ptr, 0, 0, 1000, 1000, 2000, 2000, 4294967295);
+    if (idx_ptr@[0] != 1) [ ret 1; ]
+    w1 = tape@[1];
+    w2 = tape@[2];
+    x0 = w1 >> 32;
+    y0 = w1 & 4294967295;
+    x1 = w2 >> 32;
+    y1 = w2 & 4294967295;
+    if (x0 != 0) [ ret 2; ]
+    if (y0 != 0) [ ret 3; ]
+    if (x1 != 2000) [ ret 4; ]
+    if (y1 != 2000) [ ret 5; ]
+    ret 0;
+]
+
+fn test_flat_max_curvature_continuity!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    fl_flatten_quad!(tape, idx_ptr, 0, 0, 0, 1000000, 1000000, 1000000, 4294967295);
+    count = idx_ptr@[0];
+    if (count != 128) [ ret 1; ]
+
+    loop (s:127 = 0 .. 127) [
+        curr_off = s * 4;
+        next_off = curr_off + 4;
+        off_curr2 = curr_off + 2;
+        w2_curr = tape@[off_curr2];
+        off_next1 = next_off + 1;
+        w1_next = tape@[off_next1];
+        if (w2_curr != w1_next) [ ret 2; ]
+    ]
+
+    w1_first = tape@[1];
+    last_idx = 127 * 4;
+    last_off2 = last_idx + 2;
+    w2_last = tape@[last_off2];
+    fx0 = w1_first >> 32;
+    fy0 = w1_first & 4294967295;
+    lx1 = w2_last >> 32;
+    ly1 = w2_last & 4294967295;
+    if (fx0 != 0) [ ret 3; ]
+    if (fy0 != 0) [ ret 4; ]
+    if (lx1 != 1000000) [ ret 5; ]
+    if (ly1 != 1000000) [ ret 6; ]
+    ret 0;
+]
+
+fn test_flat_de_casteljau_extrema!(tape, idx_ptr) [
+    idx_ptr@[0] = 0;
+    pb_emit_quad!(tape, idx_ptr, 0, 4000, 2000, 0, 4000, 4000, 4294967295);
+    if (idx_ptr@[0] != 2) [ ret 1; ]
+
+    w1_l1 = tape@[1];
+    w3_l1 = tape@[3];
+    y0_l1 = w1_l1 & 4294967295;
+    y2_l1 = w3_l1 & 4294967295;
+    if (y2_l1 > y0_l1) [ ret 2; ]
+    if (y2_l1 == y0_l1) [ ret 2; ]
+
+    w1_l2 = tape@[5];
+    w3_l2 = tape@[7];
+    y0_l2 = w1_l2 & 4294967295;
+    y2_l2 = w3_l2 & 4294967295;
+    if (y2_l2 < y0_l2) [ ret 3; ]
+    if (y2_l2 == y0_l2) [ ret 3; ]
+
+    if (y2_l1 != y0_l2) [ ret 4; ]
+    ret 0;
+]
+
+// ------------------------------------------------------------------------------
+// SECTION 4: MSDF INTEGER TYPOGRAPHY ENGINE STRESS
+// ------------------------------------------------------------------------------
+
+fn test_trg_boundary_stress!() [
+    script_a = TRG_SCRIPT_ENGLISH;
+    script_b = TRG_SCRIPT_BENGALI;
+    diff_ab = script_b - script_a;
+    delta_ab = diff_ab - 128;
+
+    // Test Bank A boundaries (0..111)
+    c0 = trg_decode_1b(0, script_a, delta_ab);
+    if (c0 != 256) [ ret 1; ]
+    c111 = trg_decode_1b(111, script_a, delta_ab);
+    if (c111 != 367) [ ret 2; ]
+
+    // Test Operators boundary (0x70..0x7F) -> 112..127 unchanged
+    cop0 = trg_decode_1b(112, script_a, delta_ab);
+    if (cop0 != 112) [ ret 3; ]
+    cop15 = trg_decode_1b(127, script_a, delta_ab);
+    if (cop15 != 127) [ ret 4; ]
+
+    // Test Bank B boundaries (0x80..0xEF) -> 512 + 0 .. 512 + 111
+    cb0 = trg_decode_1b(128, script_a, delta_ab);
+    if (cb0 != 512) [ ret 5; ]
+    cb111 = trg_decode_1b(239, script_a, delta_ab);
+    if (cb111 != 623) [ ret 6; ]
+
+    // Test Delimiters boundary (0xF0..0xFF) -> 240..255 unchanged
+    cdel0 = trg_decode_1b(240, script_a, delta_ab);
+    if (cdel0 != 240) [ ret 7; ]
+    cdel15 = trg_decode_1b(255, script_a, delta_ab);
+    if (cdel15 != 255) [ ret 8; ]
+    ret 0;
+]
+
+fn test_msdf_median_exhaustive() [
+    if (msdf_median(0, 128, 255) != 128) [ ret 1; ]
+    if (msdf_median(255, 128, 0) != 128) [ ret 2; ]
+    if (msdf_median(128, 0, 255) != 128) [ ret 3; ]
+    if (msdf_median(0, 255, 128) != 128) [ ret 4; ]
+    if (msdf_median(255, 0, 128) != 128) [ ret 5; ]
+    if (msdf_median(128, 255, 0) != 128) [ ret 6; ]
+
+    if (msdf_median(128, 128, 128) != 128) [ ret 7; ]
+    if (msdf_median(0, 0, 0) != 0) [ ret 8; ]
+    if (msdf_median(255, 255, 255) != 255) [ ret 9; ]
+
+    if (msdf_median(0, 128, 128) != 128) [ ret 10; ]
+    if (msdf_median(128, 128, 255) != 128) [ ret 11; ]
+    if (msdf_median(0, 255, 0) != 0) [ ret 12; ]
+    ret 0;
+]
+
+fn test_msdf_layout_trg_bounds!(out_pos, trg_buf) [
+    // 1. Invalid Magic Byte Test (magic = 0 != 84)
+    trg_buf@[0] = 10;
+    r_bad = msdf_layout_trg_line!(trg_buf, 0, 0, 256, out_pos, 100);
+    if (r_bad != 0) [ ret 1; ]
+
+    // 2. Truncation to max_glyphs: payload length = 20, max_glyphs = 5
+    mag_sh = 84 << 56;
+    a_sh = 1 << 32;
+    hdr = mag_sh | a_sh;
+    w0_hdr = hdr | 20;
+    trg_buf@[0] = w0_hdr;
+
+    payload_ptr = trg_buf + 64;
+    loop (i:20 = 0 .. 20) [
+        payload_ptr@[i * 1] = i;
+    ]
+
+    r_trunc = msdf_layout_trg_line!(trg_buf, 0, 0, 256, out_pos, 5);
+    if (r_trunc != 5) [ ret 2; ]
+    ret 0;
+]
+
+// ------------------------------------------------------------------------------
+// SECTION 5: MEMORY SAFETY & FRAMEBUFFER CANARY AUDIT
+// ------------------------------------------------------------------------------
+
+fn test_slsp_framebuffer_canaries!(arena) [
+    pre_canaries = arena_alloc_words!(arena, 128);
+    loop (i:128 = 0 .. 128) [
+        pre_canaries@[i] = CANARY_MAGIC_PRE;
+    ]
+
+    surface = slsp_create!(arena, 1920, 1080, 0);
+    if (surface == 0) [ ret 1; ]
+    fb_ptr = surface.SLSP_WORD_FB_PTR;
+
+    post_canaries = arena_alloc_words!(arena, 128);
+    loop (i:128 = 0 .. 128) [
+        post_canaries@[i] = CANARY_MAGIC_POST;
+    ]
+
+    tile_words = arena_alloc_words!(arena, 128);
+    loop (w:128 = 0 .. 128) [
+        tile_words@[w] = -1;
+    ]
+
+    slsp_beam_flush_tile!(fb_ptr, 0, 0, 7680, tile_words);
+    slsp_beam_flush_tile!(fb_ptr, 119, 0, 7680, tile_words);
+    slsp_beam_flush_tile!(fb_ptr, 0, 67, 7680, tile_words);
+    slsp_beam_flush_tile!(fb_ptr, 119, 67, 7680, tile_words);
+
+    loop (i:128 = 0 .. 128) [
+        if (pre_canaries@[i] != CANARY_MAGIC_PRE) [ ret 2; ]
+        if (post_canaries@[i] != CANARY_MAGIC_POST) [ ret 3; ]
+    ]
+    ret 0;
+]
+
+fn test_slsp_dirty_mask_boundaries!(mask_buf) [
+    mask_buf@[0] = CANARY_MAGIC_PRE;
+    mask_ptr = mask_buf + 8;
+    loop (i:128 = 0 .. 128) [
+        mask_ptr@[i] = 0;
+    ]
+    mask_buf@[129] = CANARY_MAGIC_POST;
+
+    // Stamp out-of-bounds tiles (must be rejected)
+    bo_stamp_tile!(mask_ptr, -1, 0);
+    bo_stamp_tile!(mask_ptr, 0, -1);
+    bo_stamp_tile!(mask_ptr, 120, 0);
+    bo_stamp_tile!(mask_ptr, 0, 68);
+    bo_stamp_tile!(mask_ptr, 1000, 1000);
+
+    // Stamp absolute highest valid tile: (119, 67)
+    bo_stamp_tile!(mask_ptr, 119, 67);
+
+    // Verify tile (119, 67) is set:
+    is_set = bo_test_tile(mask_ptr, 119, 67);
+    if (is_set != 1) [ ret 1; ]
+
+    w127 = mask_ptr@[127];
+    is_bit_31 = (w127 >> 31) & 1;
+    if (is_bit_31 != 1) [ ret 1; ]
+
+    if (mask_buf@[0] != CANARY_MAGIC_PRE) [ ret 2; ]
+    if (mask_buf@[129] != CANARY_MAGIC_POST) [ ret 3; ]
+    ret 0;
+]
+
+// ------------------------------------------------------------------------------
+// SECTION 6: HEDDLE SHUTTER REAPER & OCCLUSION STRESS
+// ------------------------------------------------------------------------------
+
+fn test_reap_100_overlapping_windows!(tape, shutter_mask) [
+    tape_len = 100;
+    loop (w:100 = 0 .. 100) [
+        off = w * 4;
+        eff = EFFECT_PURE;
+        tx_lo = 2; tx_hi = 8; ty_lo = 2; ty_hi = 8;
+        if (w == 99) [
+            eff = EFFECT_SHUTTER;
+            tx_lo = 1; tx_hi = 9; ty_lo = 1; ty_hi = 9;
+        ]
+        tx_span = (tx_lo << 8) | tx_hi;
+        w0 = (1 << 56) | (eff << 48) | (tx_span << 32) | 4294967295;
+        row_mask = fl_make_row_mask(ty_lo, ty_hi);
+        off1 = off + 1;
+        off2 = off + 2;
+        off3 = off + 3;
+        tape@[off] = w0;
+        tape@[off1] = 0;
+        tape@[off2] = 0;
+        tape@[off3] = row_mask;
+    ]
+
+    reaped = hd_reap_shutter!(tape, tape_len, shutter_mask);
+    if (reaped != 99) [ ret 1; ]
+
+    w0_bg = tape@[0] >> 56;
+    if (w0_bg != 0) [ ret 2; ]
+
+    fg_off = 99 * 4;
+    w0_fg = tape@[fg_off] >> 56;
+    if (w0_fg != 1) [ ret 3; ]
+    ret 0;
+]
+
+// ------------------------------------------------------------------------------
+// SECTION 7: DETERMINISTIC HIGH-LOAD PRNG FUZZING
+// ------------------------------------------------------------------------------
+
+fn test_fuzz_prng_pipeline!(tape, scratch, cov) [
+    seed = 123456789;
+    a = 6364136223846793005;
+    c = 1442695040888963407;
+
+    idx_ptr = tape + 4096;
+    idx_ptr@[0] = 0;
+
+    loop (step:1000 = 0 .. 1000) [
+        seed = (seed * a) + c;
+        raw_x0 = (seed >> 32) & 524287; // Q24.8 in [0..524287]
+        seed = (seed * a) + c;
+        raw_y0 = (seed >> 32) & 262143; // Q24.8 in [0..262143]
+        seed = (seed * a) + c;
+        raw_x1 = (seed >> 32) & 524287;
+        seed = (seed * a) + c;
+        raw_y1 = (seed >> 32) & 262143;
+
+        pb_clip_line!(tape, idx_ptr, raw_x0, raw_y0, raw_x1, raw_y1, 4294967295);
+        if (idx_ptr@[0] > 900) [
+            idx_ptr@[0] = 0;
+        ]
+    ]
+
+    cords_to_weave = idx_ptr@[0];
+    if (cords_to_weave > 100) [
+        cords_to_weave = 100;
+    ]
+    lm_weave_tile!(tape, cords_to_weave, 5, 5, 0, scratch, cov);
+
+    loop (p:TILE_PIXELS = 0 .. TILE_PIXELS) [
+        val = cov@[p];
+        if (val < 0) [ ret 1; ]
+        if (val > 256) [ ret 2; ]
+    ]
+    ret 0;
+]
+
+fn test_fuzz_500_overlapping_shapes!(tape, scratch, cov) [
+    seed = 987654321;
+    a = 6364136223846793005;
+    c = 1442695040888963407;
+
+    idx_ptr = tape + 4096;
+    idx_ptr@[0] = 0;
+
+    loop (tri:500 = 0 .. 500) [
+        seed = (seed * a) + c;
+        x0 = (seed >> 32) & 4095;
+        seed = (seed * a) + c;
+        y0 = (seed >> 32) & 4095;
+        seed = (seed * a) + c;
+        x1 = (seed >> 32) & 4095;
+        seed = (seed * a) + c;
+        y1 = (seed >> 32) & 4095;
+        seed = (seed * a) + c;
+        x2 = (seed >> 32) & 4095;
+        seed = (seed * a) + c;
+        y2 = (seed >> 32) & 4095;
+
+        fl_emit_cord_raw!(tape, idx_ptr, x0, y0, x1, y1, 4294967295);
+        fl_emit_cord_raw!(tape, idx_ptr, x1, y1, x2, y2, 4294967295);
+        fl_emit_cord_raw!(tape, idx_ptr, x2, y2, x0, y0, 4294967295);
+
+        if (idx_ptr@[0] > 900) [
+            idx_ptr@[0] = 0;
+        ]
+    ]
+
+    cords_count = idx_ptr@[0];
+    if (cords_count > 100) [ cords_count = 100; ]
+    lm_weave_tile!(tape, cords_count, 0, 0, 0, scratch, cov);
+
+    loop (p:TILE_PIXELS = 0 .. TILE_PIXELS) [
+        val = cov@[p];
+        if (val < 0) [ ret 1; ]
+        if (val > 256) [ ret 2; ]
+    ]
+    ret 0;
+]
+
+// ------------------------------------------------------------------------------
+// MAIN BATTLE TEST RUNNER
+// ------------------------------------------------------------------------------
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [ sys_exit!(1); ]
+
+    scratch = arena_alloc_words!(arena, 272);
+    cov = arena_alloc_words!(arena, 256);
+    tape = arena_alloc_words!(arena, 2048);
+    idx_ptr = arena_alloc_words!(arena, 4);
+    bd_buf = arena_alloc_words!(arena, 16);
+    scratch2 = arena_alloc_words!(arena, 272);
+    scratch3 = arena_alloc_words!(arena, 272);
+    text_buf = arena_alloc_words!(arena, 32);
+    mask_buf = arena_alloc_words!(arena, 132);
+
+    // Section 1: Geometric Stress
+    r1 = test_geo_zero_length!(scratch);
+    if (r1 != 0) [ sys_exit!(101); ]
+
+    r2 = test_geo_horizontal_line!(scratch);
+    if (r2 != 0) [ sys_exit!(102); ]
+
+    r3 = test_geo_cancellation!(scratch);
+    if (r3 != 0) [ sys_exit!(103); ]
+
+    r4 = test_geo_boundary_vertical_zero!(scratch);
+    if (r4 != 0) [ sys_exit!(104); ]
+
+    r5 = test_geo_boundary_vertical_hi!(scratch);
+    if (r5 != 0) [ sys_exit!(105); ]
+
+    r6 = test_geo_subpixel_micro!(scratch);
+    if (r6 != 0) [ sys_exit!(106); ]
+
+    r7 = test_geo_clipping_bounds!(tape, idx_ptr);
+    if (r7 != 0) [ sys_exit!(107); ]
+
+    r8 = test_geo_nyquist_moire_grid!(tape, scratch, cov);
+    if (r8 != 0) [ sys_exit!(108); ]
+
+    // Section 2: Area Conservation
+    r9 = test_cons_closed_triangle!(scratch);
+    if (r9 != 0) [ sys_exit!(109); ]
+
+    r10 = test_cons_multitile_horizontal_propagation!(tape, scratch, cov, bd_buf);
+    if (r10 != 0) [ sys_exit!(110); ]
+
+    r11 = test_cons_permutations_commutativity!(scratch, scratch2, scratch3);
+    if (r11 != 0) [ sys_exit!(111); ]
+
+    r12 = test_cons_subpixel_monotonicity!(scratch);
+    if (r12 != 0) [ sys_exit!(112); ]
+
+    r13 = test_cons_high_winding();
+    if (r13 != 0) [ sys_exit!(113); ]
+
+    r14 = test_cons_bowtie_winding!(tape, scratch, cov);
+    if (r14 != 0) [ sys_exit!(114); ]
+
+    // Section 3: Flattener Extremities
+    r15 = test_flat_coincident!(tape, idx_ptr);
+    if (r15 != 0) [ sys_exit!(115); ]
+
+    r16 = test_flat_collinear!(tape, idx_ptr);
+    if (r16 != 0) [ sys_exit!(116); ]
+
+    r17 = test_flat_max_curvature_continuity!(tape, idx_ptr);
+    if (r17 != 0) [ sys_exit!(117); ]
+
+    r18 = test_flat_de_casteljau_extrema!(tape, idx_ptr);
+    if (r18 != 0) [ sys_exit!(118); ]
+
+    // Section 4: Typography Engine Stress
+    r19 = test_trg_boundary_stress!();
+    if (r19 != 0) [ sys_exit!(119); ]
+
+    r20 = test_msdf_median_exhaustive();
+    if (r20 != 0) [ sys_exit!(120); ]
+
+    r21 = test_msdf_layout_trg_bounds!(tape, text_buf);
+    if (r21 != 0) [ sys_exit!(121); ]
+
+    // Section 5: Memory Safety & Canary Guards
+    r22 = test_slsp_framebuffer_canaries!(arena);
+    if (r22 != 0) [ sys_exit!(122); ]
+
+    r23 = test_slsp_dirty_mask_boundaries!(mask_buf);
+    if (r23 != 0) [ sys_exit!(123); ]
+
+    // Section 6: Shutter Reaper Stress
+    r24 = test_reap_100_overlapping_windows!(tape, mask_buf);
+    if (r24 != 0) [ sys_exit!(124); ]
+
+    // Section 7: PRNG Fuzzing Torture
+    r25 = test_fuzz_prng_pipeline!(tape, scratch, cov);
+    if (r25 != 0) [ sys_exit!(125); ]
+
+    r26 = test_fuzz_500_overlapping_shapes!(tape, scratch, cov);
+    if (r26 != 0) [ sys_exit!(126); ]
+
+    sys_exit!(0);
+]

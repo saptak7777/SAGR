@@ -21,17 +21,19 @@ fn lm_clamp(val, lo, hi) [
 ]
 
 fn lm_min(a, b) [
-    if (a < b) [
-        ret a;
-    ]
-    ret b;
+    d = a - b;
+    m = d >> 63;
+    delta = d & m;
+    res = b + delta;
+    ret res;
 ]
 
 fn lm_max(a, b) [
-    if (a > b) [
-        ret a;
-    ]
-    ret b;
+    d = a - b;
+    m = d >> 63;
+    delta = d & m;
+    res = a - delta;
+    ret res;
 ]
 
 fn lm_resolve_nonzero(w) [

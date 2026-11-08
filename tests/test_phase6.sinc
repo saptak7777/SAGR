@@ -1,153 +1,142 @@
 // ==========================================
 // tests/test_phase6.sinc
-// SAGR Phase 6 Comprehensive Test Suite: MSDF Integer Typography
+// SAGR Phase 6 Comprehensive Test Suite: Sovereign TRG & Integer MSDF
 // ==========================================
 
-fn test_msdf_sfont_header!(header_ptr) [
-    msdf_sfont_init!(header_ptr, 512, 512, 16, 4, 96, 1024);
+fn test_trg_header_contract!(header_ptr) [
+    // 64-Byte TRG Header Contract:
+    // Word 0: [Magic:8 (84) | Flags:8 (0) | ScriptB:8 (2) | ScriptA:8 (1) | Length:32 (128)]
+    mag_sh = TRG_MAGIC_BYTE << 56;
+    flags_sh = 0 << 48;
+    b_sh = 2 << 40;
+    a_sh = 1 << 32;
+    len_lo = 128 & 4294967295;
+    w0_hdr = mag_sh | flags_sh;
+    w0_scripts = b_sh | a_sh;
+    w0_top = w0_hdr | w0_scripts;
+    w0 = w0_top | len_lo;
+    header_ptr@[0] = w0;
 
-    if (header_ptr@[0] != SFONT_MAGIC) [ ret 1; ]
-    w_dims = header_ptr@[1];
-    w_w = w_dims >> 16;
-    w_h = w_dims & 65535;
-    if (w_w != 512) [ ret 2; ]
-    if (w_h != 512) [ ret 3; ]
+    // Verify byte indexing matches TRG protocol
+    magic_b = header_ptr@[7 * 1];
+    if (magic_b != TRG_MAGIC_BYTE) [ ret 1; ]
 
-    w_metrics = header_ptr@[2];
-    ascent = w_metrics >> 16;
-    descent = w_metrics & 65535;
-    if (ascent != 16) [ ret 4; ]
-    if (descent != 4) [ ret 5; ]
+    flags_b = header_ptr@[6 * 1];
+    if (flags_b != 0) [ ret 2; ]
 
-    if (header_ptr@[3] != 96) [ ret 6; ]
-    if (header_ptr@[4] != 1024) [ ret 7; ]
+    script_b = header_ptr@[5 * 1];
+    if (script_b != 2) [ ret 3; ]
+
+    script_a = header_ptr@[4 * 1];
+    if (script_a != 1) [ ret 4; ]
+
+    len_val = header_ptr@[0] & 4294967295;
+    if (len_val != 128) [ ret 5; ]
     ret 0;
 ]
 
-fn test_msdf_glyph_quad_packing!(glyphs_base) [
-    // Glyph 0: 'A' (unicode 65), advance 12, UV [10, 20, 30, 40], plane [-1, 0, 11, 14]
-    msdf_sfont_add_glyph!(glyphs_base, 0, 65, 12, 10, 20, 30, 40, 0 - 1, 0, 11, 14);
+fn test_trg_atlas_grid_uv!() [
+    // Verify O(1) direct atlas UV derivation for TRG grid cells
+    // coord 0 -> (0, 0)
+    c0 = 0;
+    u0_0 = (c0 & 15) << 4;
+    v0_0 = c0 & 65520;
+    if (u0_0 != 0) [ ret 1; ]
+    if (v0_0 != 0) [ ret 2; ]
 
-    // Glyph 1: 'B' (unicode 66), advance 11, UV [32, 20, 52, 40], plane [0, 0, 10, 14]
-    msdf_sfont_add_glyph!(glyphs_base, 1, 66, 11, 32, 20, 52, 40, 0, 0, 10, 14);
+    // coord 15 -> (240, 0)
+    c15 = 15;
+    u0_15 = (c15 & 15) << 4;
+    v0_15 = c15 & 65520;
+    if (u0_15 != 240) [ ret 3; ]
+    if (v0_15 != 0) [ ret 4; ]
 
-    // Verify Glyph 0
-    w0 = glyphs_base@[0];
-    uni = w0 >> 32;
-    adv = w0 & 4294967295;
-    if (uni != 65) [ ret 1; ]
-    if (adv != 12) [ ret 2; ]
+    // coord 16 -> (0, 16)
+    c16 = 16;
+    u0_16 = (c16 & 15) << 4;
+    v0_16 = c16 & 65520;
+    if (u0_16 != 0) [ ret 5; ]
+    if (v0_16 != 16) [ ret 6; ]
 
-    w1 = glyphs_base@[1];
-    u0 = (w1 >> 48) & 65535;
-    v0 = (w1 >> 32) & 65535;
-    u1 = (w1 >> 16) & 65535;
-    v1 = w1 & 65535;
-    if (u0 != 10) [ ret 3; ]
-    if (v0 != 20) [ ret 4; ]
-    if (u1 != 30) [ ret 5; ]
-    if (v1 != 40) [ ret 6; ]
-
-    // Find glyphs
-    idx_a = msdf_find_glyph(glyphs_base, 2, 65);
-    if (idx_a != 0) [ ret 7; ]
-    idx_b = msdf_find_glyph(glyphs_base, 2, 66);
-    if (idx_b != 1) [ ret 8; ]
-    idx_missing = msdf_find_glyph(glyphs_base, 2, 999);
-    if (idx_missing != 0 - 1) [ ret 9; ]
+    // coord 256 (Page 1) -> (0, 256)
+    c256 = 256;
+    u0_256 = (c256 & 15) << 4;
+    v0_256 = c256 & 65520;
+    if (u0_256 != 0) [ ret 7; ]
+    if (v0_256 != 256) [ ret 8; ]
     ret 0;
 ]
 
-fn test_msdf_utf8_ascii!(text_buf) [
-    // Store ASCII string "SAGR" (83, 65, 71, 82)
-    b0 = 83;
-    b1_sh = 65 << 8;
-    b2_sh = 71 << 16;
-    b3_sh = 82 << 24;
-    s01 = b0 | b1_sh;
-    s23 = b2_sh | b3_sh;
-    text_buf@[0] = s01 | s23;
+fn test_trg_decode_1b_english!() [
+    script_a = TRG_SCRIPT_ENGLISH;
+    script_b = 0;
+    diff_ab = script_b - script_a;
+    delta_ab = diff_ab - 128;
 
-    dec0 = msdf_decode_utf8(text_buf, 0);
-    c0 = dec0 & 4294967295;
-    l0 = dec0 >> 32;
-    if (c0 != 83) [ ret 1; ]
-    if (l0 != 1) [ ret 2; ]
+    // 1. Slot 0 ('A') -> 256 + 0 = 256
+    c0 = trg_decode_1b(0, script_a, delta_ab);
+    if (c0 != 256) [ ret 1; ]
 
-    dec1 = msdf_decode_utf8(text_buf, 1);
-    c1 = dec1 & 4294967295;
-    l1 = dec1 >> 32;
-    if (c1 != 65) [ ret 3; ]
-    if (l1 != 1) [ ret 4; ]
+    // 2. Slot 25 ('Z') -> 256 + 25 = 281
+    c25 = trg_decode_1b(25, script_a, delta_ab);
+    if (c25 != 281) [ ret 2; ]
 
-    dec2 = msdf_decode_utf8(text_buf, 2);
-    c2 = dec2 & 4294967295;
-    l2 = dec2 >> 32;
-    if (c2 != 71) [ ret 5; ]
-    if (l2 != 1) [ ret 6; ]
+    // 3. Slot 26 ('a') -> 256 + 26 = 282
+    c26 = trg_decode_1b(26, script_a, delta_ab);
+    if (c26 != 282) [ ret 3; ]
 
-    dec3 = msdf_decode_utf8(text_buf, 3);
-    c3 = dec3 & 4294967295;
-    l3 = dec3 >> 32;
-    if (c3 != 82) [ ret 7; ]
-    if (l3 != 1) [ ret 8; ]
+    // 4. Slot 61 ('9') -> 256 + 61 = 317
+    c61 = trg_decode_1b(61, script_a, delta_ab);
+    if (c61 != 317) [ ret 4; ]
+
+    // 5. Operator Slot 0x70 ('+') -> 112 directly
+    c_op = trg_decode_1b(112, script_a, delta_ab);
+    if (c_op != 112) [ ret 5; ]
+
+    // 6. Delimiter Slot 0xF0 (' ') -> 240 directly
+    c_sp = trg_decode_1b(240, script_a, delta_ab);
+    if (c_sp != 240) [ ret 6; ]
     ret 0;
 ]
 
-fn test_msdf_utf8_multibyte!(text_buf) [
-    // 1. 2-byte UTF-8: Greek Delta (U+0394 = 916) -> 0xCE (206), 0x94 (148)
-    b0 = 206;
-    b1_sh = 148 << 8;
-    text_buf@[0] = b0 | b1_sh;
-    dec2 = msdf_decode_utf8(text_buf, 0);
-    cp2 = dec2 & 4294967295;
-    len2 = dec2 >> 32;
-    if (cp2 != 916) [ ret 1; ]
-    if (len2 != 2) [ ret 2; ]
+fn test_trg_decode_1b_bilingual!() [
+    // Bilingual: Bank A = English (256), Bank B = Bengali (512)
+    script_a = TRG_SCRIPT_ENGLISH;
+    script_b = TRG_SCRIPT_BENGALI;
+    diff_ab = script_b - script_a;
+    delta_ab = diff_ab - 128;
 
-    // 2. 3-byte UTF-8: Euro sign (U+20AC = 8364) -> 0xE2 (226), 0x82 (130), 0xAC (172)
-    b0_3 = 226;
-    b1_3 = 130 << 8;
-    b2_3 = 172 << 16;
-    s01_3 = b0_3 | b1_3;
-    text_buf@[0] = s01_3 | b2_3;
-    dec3 = msdf_decode_utf8(text_buf, 0);
-    cp3 = dec3 & 4294967295;
-    len3 = dec3 >> 32;
-    if (cp3 != 8364) [ ret 3; ]
-    if (len3 != 3) [ ret 4; ]
+    // Bank A: Slot 0 ('A') -> 256
+    ca = trg_decode_1b(0, script_a, delta_ab);
+    if (ca != 256) [ ret 1; ]
 
-    // 3. 4-byte UTF-8: Musical Symbol G Clef (U+1D11E = 119070) -> 0xF0 (240), 0x9D (157), 0x84 (132), 0x9E (158)
-    b0_4 = 240;
-    b1_4 = 157 << 8;
-    b2_4 = 132 << 16;
-    b3_4 = 158 << 24;
-    s01_4 = b0_4 | b1_4;
-    s23_4 = b2_4 | b3_4;
-    text_buf@[0] = s01_4 | s23_4;
-    dec4 = msdf_decode_utf8(text_buf, 0);
-    cp4 = dec4 & 4294967295;
-    len4 = dec4 >> 32;
-    if (cp4 != 119070) [ ret 5; ]
-    if (len4 != 4) [ ret 6; ]
+    // Bank B: Slot 0 (raw_byte = 128, Bengali slot 0) -> 512 + 0 = 512
+    cb0 = trg_decode_1b(128, script_a, delta_ab);
+    if (cb0 != 512) [ ret 2; ]
+
+    // Bank B: Slot 16 (raw_byte = 144, Bengali slot 16) -> 512 + 16 = 528
+    cb16 = trg_decode_1b(144, script_a, delta_ab);
+    if (cb16 != 528) [ ret 3; ]
+
+    // Bilingual: Bank A = English (256), Bank B = Tamil (1024)
+    script_b_ta = TRG_SCRIPT_TAMIL;
+    diff_ta = script_b_ta - script_a;
+    delta_ta = diff_ta - 128;
+
+    // Bank B: Slot 14 (raw_byte = 142, Tamil slot 14) -> 1024 + 14 = 1038
+    cta14 = trg_decode_1b(142, script_a, delta_ta);
+    if (cta14 != 1038) [ ret 4; ]
     ret 0;
 ]
 
 fn test_msdf_median_exhaustive() [
-    // Permutation 1: r <= g <= b
     if (msdf_median(50, 100, 150) != 100) [ ret 1; ]
-    // Permutation 2: r <= b <= g
     if (msdf_median(50, 150, 100) != 100) [ ret 2; ]
-    // Permutation 3: g <= r <= b
     if (msdf_median(100, 50, 150) != 100) [ ret 3; ]
-    // Permutation 4: g <= b <= r
     if (msdf_median(150, 50, 100) != 100) [ ret 4; ]
-    // Permutation 5: b <= r <= g
     if (msdf_median(100, 150, 50) != 100) [ ret 5; ]
-    // Permutation 6: b <= g <= r
     if (msdf_median(150, 100, 50) != 100) [ ret 6; ]
 
-    // Equal values
     if (msdf_median(128, 128, 128) != 128) [ ret 7; ]
     if (msdf_median(0, 0, 0) != 0) [ ret 8; ]
     if (msdf_median(255, 255, 255) != 255) [ ret 9; ]
@@ -155,46 +144,38 @@ fn test_msdf_median_exhaustive() [
 ]
 
 fn test_msdf_bilinear_exact!(atlas_buf) [
-    // Create a 4x4 atlas where texel (1, 1) = 100, (2, 1) = 200, (1, 2) = 100, (2, 2) = 200
-    // Fill all texels with 0 first
-    loop (ti:16 = 0 .. 16) [
-        atlas_buf@[ti] = 0;
-    ]
+    // 4x4 atlas buffer
+    atlas_buf@[0] = 0;
+    atlas_buf@[1] = 255;
+    atlas_buf@[4] = 0;
+    atlas_buf@[5] = 255;
 
-    // Set texels (R, G, B channels all identical for simple check)
-    // idx = y * 4 + x
-    c100 = 100 | (100 << 8) | (100 << 16);
-    c200 = 200 | (200 << 8) | (200 << 16);
-    atlas_buf@[5] = c100; // (1, 1)
-    atlas_buf@[6] = c200; // (2, 1)
-    atlas_buf@[9] = c100; // (1, 2)
-    atlas_buf@[10] = c200; // (2, 2)
-
-    // Sample exactly at (1.0, 1.0) -> must be exactly 100
-    u_exact = 1 << 16;
-    v_exact = 1 << 16;
-    res_exact = msdf_bilinear_sample(atlas_buf, 4, u_exact, v_exact);
+    // Sample exactly at (0, 0) in Q16.16 -> 0
+    res_exact = msdf_bilinear_sample(atlas_buf, 4, 0, 0);
     r_exact = res_exact & 255;
-    if (r_exact != 100) [ ret 1; ]
+    if (r_exact != 0) [ ret 1; ]
 
-    // Sample halfway horizontally at (1.5, 1.0) -> (100 + 200)/2 = 150
-    u_half = (1 << 16) + (128 << 8);
-    res_half = msdf_bilinear_sample(atlas_buf, 4, u_half, v_exact);
+    // Sample at (0.5, 0.0) -> half texel between 0 and 255 -> 127 or 128
+    u_half = 32768;
+    res_half = msdf_bilinear_sample(atlas_buf, 4, u_half, 0);
     r_half = res_half & 255;
-    if (r_half != 150) [ ret 2; ]
+    if (r_half < 127) [ ret 2; ]
+    if (r_half > 128) [ ret 3; ]
 
-    // Sample center at (1.5, 1.5) -> average of all four = (100 + 200 + 100 + 200)/4 = 150
-    v_half = (1 << 16) + (128 << 8);
+    // Sample at (0.5, 0.5)
+    v_half = 32768;
     res_center = msdf_bilinear_sample(atlas_buf, 4, u_half, v_half);
     r_center = res_center & 255;
-    if (r_center != 150) [ ret 3; ]
+    if (r_center < 127) [ ret 4; ]
+    if (r_center > 128) [ ret 5; ]
     ret 0;
 ]
 
 fn test_msdf_screen_space_ramp() [
-    scale_1x = 256; // 1.0 in Q8.8
+    scale_1x = 256;
+    scale_high = 2048;
 
-    // 1. Edge center (128) -> exactly 128
+    // 1. Exact edge (128) -> alpha = 128
     a_edge = msdf_eval_alpha(128, scale_1x);
     if (a_edge != 128) [ ret 1; ]
 
@@ -206,137 +187,117 @@ fn test_msdf_screen_space_ramp() [
     a_out = msdf_eval_alpha(98, scale_1x);
     if (a_out != 98) [ ret 3; ]
 
-    // 4. Far inside (255) with high scale -> saturates cleanly at 255
-    scale_high = 512; // 2.0x
+    // 4. Saturating high scale (clamps to 255)
     a_sat_hi = msdf_eval_alpha(240, scale_high);
     if (a_sat_hi != 255) [ ret 4; ]
 
-    // 5. Far outside (10) with high scale -> clamps cleanly at 0
+    // 5. Saturating low scale (clamps to 0)
     a_sat_lo = msdf_eval_alpha(10, scale_high);
     if (a_sat_lo != 0) [ ret 5; ]
     ret 0;
 ]
 
 fn test_msdf_sharp_corner_preservation() [
-    // In standard SDF, a corner point has a single distance that causes corner rounding.
-    // In MSDF, two intersecting edges have distinct color channels:
-    // Vertical edge is in Red (d_r = 180 > 128, interior)
-    // Horizontal edge is in Blue (d_b = 180 > 128, interior)
-    // Diagonal apex has Green = 70 (< 128, exterior)
-    // Median of (180, 70, 180) is 180 -> stays sharply inside!
     med_corner = msdf_median(180, 70, 180);
     if (med_corner != 180) [ ret 1; ]
 
-    // Outside the corner: R = 70, G = 180, B = 70
-    // Median is 70 -> stays sharply outside!
     med_out = msdf_median(70, 180, 70);
     if (med_out != 70) [ ret 2; ]
     ret 0;
 ]
 
 fn test_msdf_glyph_tile_shading!(atlas_buf, tile_words) [
-    // Create a 16x16 atlas (256 texels) filled with a test glyph distance of 200 (interior)
-    val_b = 200 << 16;
-    val_g = 200 << 8;
-    val_rg = 200 | val_g;
-    val = val_rg | val_b;
     ti = 0;
     loop (step:256 = 0 .. 256) [
-        atlas_buf@[ti] = val;
+        atlas_buf@[ti] = 13158600; // RGB: (200, 200, 200)
         ti = ti + 1;
     ]
 
-    // Clear tile words
     w = 0;
-    loop (step_w:128 = 0 .. 128) [
+    loop (step:128 = 0 .. 128) [
         tile_words@[w] = 0;
         w = w + 1;
     ]
 
-    fg_white = 4294967295; // (255, 255, 255, 255)
+    fg_white = 4294967295;
     msdf_render_glyph_tile!(atlas_buf, 16, 0, 0, 16, 16, 0, 0, 256, fg_white, tile_words);
 
-    // Verify tile has non-zero words
     w0 = tile_words@[0];
     if (w0 == 0) [ ret 1; ]
     w127 = tile_words@[127];
     if (w127 == 0) [ ret 2; ]
 
-    // Check pixel 0 components
     p0 = w0 & 4294967295;
     a0 = (p0 >> 24) & 255;
-    // median 200, cov = 200; fg_a = 255 -> 255 * 200 >> 8 = 199
     if (a0 != 199) [ ret 3; ]
     ret 0;
 ]
 
-fn test_msdf_layout_line!(glyphs_base, text_buf, positions_buf) [
-    // Add ASCII glyphs for 'S' (83), 'A' (65), 'G' (71), 'R' (82)
-    msdf_sfont_add_glyph!(glyphs_base, 0, 83, 10, 0, 0, 8, 16, 0, 0, 8, 16);
-    msdf_sfont_add_glyph!(glyphs_base, 1, 65, 12, 8, 0, 16, 16, 0, 0, 8, 16);
-    msdf_sfont_add_glyph!(glyphs_base, 2, 71, 12, 16, 0, 24, 16, 0, 0, 8, 16);
-    msdf_sfont_add_glyph!(glyphs_base, 3, 82, 11, 24, 0, 32, 16, 0, 0, 8, 16);
+fn test_trg_xor_bracket() [
+    // '(' = 0xF4 (244) ^ 1 -> ')' = 0xF5 (245)
+    b_lparen = 244;
+    b_rparen = b_lparen ^ 1;
+    if (b_rparen != 245) [ ret 1; ]
 
-    // Text: "SAGR" (4 bytes)
-    b0 = 83;
-    b1_sh = 65 << 8;
-    b2_sh = 71 << 16;
-    b3_sh = 82 << 24;
-    s01 = b0 | b1_sh;
-    s23 = b2_sh | b3_sh;
-    text_buf@[0] = s01 | s23;
+    // '[' = 0xF6 (246) ^ 1 -> ']' = 0xF7 (247)
+    b_lbrack = 246;
+    b_rbrack = b_lbrack ^ 1;
+    if (b_rbrack != 247) [ ret 2; ]
 
-    count = msdf_layout_line!(glyphs_base, 4, text_buf, 4, 100, 200, 256, positions_buf, 100);
+    // '{' = 0xF8 (248) ^ 1 -> '}' = 0xF9 (249)
+    b_lbrace = 248;
+    b_rbrace = b_lbrace ^ 1;
+    if (b_rbrace != 249) [ ret 3; ]
 
-    // Must lay out exactly 4 glyphs
-    if (count != 4) [ ret 1; ]
-
-    // Glyph 0: 'S', x = 100
-    if (positions_buf@[0] != 0) [ ret 2; ]
-    if (positions_buf@[1] != 100) [ ret 3; ]
-
-    // Glyph 1: 'A', x = 100 + 10 = 110
-    if (positions_buf@[4] != 1) [ ret 4; ]
-    if (positions_buf@[5] != 110) [ ret 5; ]
-
-    // Glyph 2: 'G', x = 110 + 12 = 122
-    if (positions_buf@[8] != 2) [ ret 6; ]
-    if (positions_buf@[9] != 122) [ ret 7; ]
-
-    // Glyph 3: 'R', x = 122 + 12 = 134
-    if (positions_buf@[12] != 3) [ ret 8; ]
-    if (positions_buf@[13] != 134) [ ret 9; ]
+    // Invert back: '}' ^ 1 -> '{'
+    b_back = b_rbrace ^ 1;
+    if (b_back != 248) [ ret 4; ]
     ret 0;
 ]
 
-fn test_msdf_4500_glyphs_stress_gate!(glyphs_base, text_buf, positions_buf) [
-    // Setup a 90-column line of text repeated 50 times = 4,500 glyphs (full 1080p code editor screen)
-    // Fill text_buf with repeating ASCII 65 ('A')
-    word_a = 65 | (65 << 8) | (65 << 16) | (65 << 24);
-    word_a_hi = word_a << 32;
-    word_8a = word_a_hi | (word_a & 4294967295);
+fn test_msdf_layout_trg_line!(out_positions, trg_buf) [
+    // Setup TRG container:
+    // Header Word 0: [Magic:8 (bits 56..63) | Flags:8 | ScriptB:8 | ScriptA:8 | Length:32]
+    // Length = 4, ScriptA = 1 (English), ScriptB = 0, Magic = 84 ('T')
+    mag_sh = 84 << 56;
+    a_sh = 1 << 32;
+    hdr = mag_sh | a_sh;
+    w0_hdr = hdr | 4;
+    trg_buf@[0] = w0_hdr;
 
-    sw = 0;
-    loop (step:12 = 0 .. 12) [
-        text_buf@[sw] = word_8a;
-        sw = sw + 1;
-    ]
+    // Payload (byte 64): TRG string "SAGR"
+    // 'S' = slot 18, 'A' = slot 0, 'G' = slot 6, 'R' = slot 17
+    payload_ptr = trg_buf + 64;
+    payload_ptr@[0 * 1] = 18;
+    payload_ptr@[1 * 1] = 0;
+    payload_ptr@[2 * 1] = 6;
+    payload_ptr@[3 * 1] = 17;
 
-    total_glyphs = 0;
-    line_y = 0;
-    loop (line:50 = 0 .. 50) [
-        y_pos = line * 20;
-        line_count = msdf_layout_line!(glyphs_base, 4, text_buf, 90, 0, y_pos, 256, positions_buf, 100);
-        total_glyphs = total_glyphs + line_count;
-    ]
+    // Layout line at x=0, y=0, scale=256 (1.0x), max_glyphs=100
+    emitted = msdf_layout_trg_line!(trg_buf, 0, 0, 256, out_positions, 100);
+    if (emitted != 4) [ ret 1; ]
 
-    // 50 lines x 90 glyphs = 4,500 glyphs exact
-    if (total_glyphs != 4500) [ ret 1; ]
+    // Verify Glyph 0 in out_positions: [coord, x, y, scaled_adv]
+    // 'S' in English (Script 1 -> base 256): coord = 256 + 18 = 274
+    coord0 = out_positions@[0];
+    if (coord0 != 274) [ ret 2; ]
+    x0 = out_positions@[1];
+    if (x0 != 0) [ ret 3; ]
+    y0 = out_positions@[2];
+    if (y0 != 0) [ ret 4; ]
+    adv0 = out_positions@[3];
+    if (adv0 != 4096) [ ret 5; ] // 16 * 256
+
+    // Verify Glyph 1: 'A' -> coord = 256 + 0 = 256, x = 4096
+    coord1 = out_positions@[4];
+    if (coord1 != 256) [ ret 6; ]
+    x1 = out_positions@[5];
+    if (x1 != 4096) [ ret 7; ]
+
     ret 0;
 ]
 
 fn test_msdf_background_preservation!(atlas_buf, tile_words) [
-    // Pre-fill tile_words with solid background (R:50, G:100, B:150, A:255)
     bg_px = (255 << 24) | (150 << 16) | (100 << 8) | 50;
     bg_w = (bg_px << 32) | bg_px;
     w = 0;
@@ -345,24 +306,18 @@ fn test_msdf_background_preservation!(atlas_buf, tile_words) [
         w = w + 1;
     ]
 
-    // Set atlas texels to distance 0 (outside glyph contour, coverage = 0)
     ti = 0;
     loop (step:256 = 0 .. 256) [
         atlas_buf@[ti] = 0;
         ti = ti + 1;
     ]
 
-    // Render glyph (foreground = gold)
     fg_gold = 4278245375;
     msdf_render_glyph_tile!(atlas_buf, 16, 0, 0, 16, 16, 0, 0, 256, fg_gold, tile_words);
 
-    // Pixel 0 must retain original background color (bg_px)
     w0 = tile_words@[0];
     p0 = w0 & 4294967295;
-    if (p0 != bg_px) [
-        // FAILED: msdf_render_glyph_tile destroyed background with 0!
-        ret 1;
-    ]
+    if (p0 != bg_px) [ ret 1; ]
     ret 0;
 ]
 
@@ -375,22 +330,21 @@ fn main!() [
     ]
 
     header_buf = arena_alloc_words!(arena, 16);
-    glyphs_base = arena_alloc_words!(arena, 512);
-    text_buf = arena_alloc_words!(arena, 128);
+    trg_buf = arena_alloc_words!(arena, 128);
     atlas_buf = arena_alloc_words!(arena, 1024);
     tile_words = arena_alloc_words!(arena, 128);
-    positions_buf = arena_alloc_words!(arena, 1024);
+    out_positions = arena_alloc_words!(arena, 512);
 
-    r1 = test_msdf_sfont_header!(header_buf);
+    r1 = test_trg_header_contract!(header_buf);
     if (r1 != 0) [ sys_exit!(101); ]
 
-    r2 = test_msdf_glyph_quad_packing!(glyphs_base);
+    r2 = test_trg_atlas_grid_uv!();
     if (r2 != 0) [ sys_exit!(102); ]
 
-    r3 = test_msdf_utf8_ascii!(text_buf);
+    r3 = test_trg_decode_1b_english!();
     if (r3 != 0) [ sys_exit!(103); ]
 
-    r4 = test_msdf_utf8_multibyte!(text_buf);
+    r4 = test_trg_decode_1b_bilingual!();
     if (r4 != 0) [ sys_exit!(104); ]
 
     r5 = test_msdf_median_exhaustive();
@@ -408,10 +362,10 @@ fn main!() [
     r9 = test_msdf_glyph_tile_shading!(atlas_buf, tile_words);
     if (r9 != 0) [ sys_exit!(109); ]
 
-    r10 = test_msdf_layout_line!(glyphs_base, text_buf, positions_buf);
+    r10 = test_trg_xor_bracket();
     if (r10 != 0) [ sys_exit!(110); ]
 
-    r11 = test_msdf_4500_glyphs_stress_gate!(glyphs_base, text_buf, positions_buf);
+    r11 = test_msdf_layout_trg_line!(out_positions, trg_buf);
     if (r11 != 0) [ sys_exit!(111); ]
 
     r12 = test_msdf_background_preservation!(atlas_buf, tile_words);

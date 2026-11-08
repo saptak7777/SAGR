@@ -144,10 +144,11 @@ fn hd_blend_channel(src_ch, dst_ch, inv_a) [
     prod = dst_ch * inv_a;
     sh = prod >> 8;
     res = src_ch + sh;
-    if (res > 255) [
-        ret 255;
-    ]
-    ret res;
+    d = 255 - res;
+    m = d >> 63;
+    delta = d & m;
+    clamped = res + delta;
+    ret clamped;
 ]
 
 fn hd_blend_pixel(src_px, dst_px) [
