@@ -94,13 +94,9 @@ Once the raw prefix sum is computed, each pixel holds a cumulative winding value
 $$\alpha = \min(|W|, 256)$$
 ```sinc
 fn lm_resolve_nonzero(w) [
-    if (w < 0) [
-        w = 0 - w;
-    ]
-    if (w > 256) [
-        ret 256;
-    ]
-    ret w;
+    aw = bo_abs(w);
+    res = lm_min(aw, 256);
+    ret res;
 ]
 ```
 
@@ -108,15 +104,11 @@ fn lm_resolve_nonzero(w) [
 Uses binary folding around $512$:
 ```sinc
 fn lm_resolve_evenodd(w) [
-    if (w < 0) [
-        w = 0 - w;
-    ]
-    m = w & 511;
-    if (m > 256) [
-        fold = 512 - m;
-        ret fold;
-    ]
-    ret m;
+    aw = bo_abs(w);
+    m = aw & 511;
+    fold = 512 - m;
+    res = lm_min(m, fold);
+    ret res;
 ]
 ```
 

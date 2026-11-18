@@ -1,0 +1,104 @@
+// ==========================================
+// sassets/sys/entry.sinc
+// Pure SINC Sovereign Asset Compiler Driver (bin/sagr-bake)
+// Usage: sagr-bake <input.tile|input.tape|input.ppm> <output.stile|output.stape>
+// ==========================================
+
+fn baker_str_len(s) [
+    len = 0;
+    active = 1;
+    loop (l:4096 = 0 .. 4096) [
+        if (active == 1) [
+            b = s@[l * 1];
+            if (b == 0) [
+                active = 0;
+            ]
+            if (active == 1) [
+                len = len + 1;
+            ]
+        ]
+    ]
+    ret len;
+]
+
+fn baker_has_ext(path, len, b1, b2, b3, b4) [
+    if (len < 5) [
+        ret 0;
+    ]
+    p_off = len - 5;
+    b0 = path@[p_off * 1];
+    if (b0 != 46) [
+        ret 0;
+    ]
+    o1 = p_off + 1;
+    c1 = path@[o1 * 1];
+    if (c1 != b1) [
+        ret 0;
+    ]
+    o2 = p_off + 2;
+    c2 = path@[o2 * 1];
+    if (c2 != b2) [
+        ret 0;
+    ]
+    o3 = p_off + 3;
+    c3 = path@[o3 * 1];
+    if (c3 != b3) [
+        ret 0;
+    ]
+    o4 = p_off + 4;
+    c4 = path@[o4 * 1];
+    if (c4 != b4) [
+        ret 0;
+    ]
+    ret 1;
+]
+
+fn baker_print_usage!(arena) [
+    buf = arena_alloc_words!(arena, 5);
+    buf@[0] = 8295694720817001301;
+    buf@[1] = 7308041894635923297;
+    buf@[2] = 4500351053399145504;
+    buf@[3] = 8391737126163528736;
+    buf@[4] = 2622;
+    sys_write!(1, buf, 34);
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+
+    args = get_argv!();
+    in_path = args@[1];
+    out_path = args@[2];
+
+    if (in_path == 0) [
+        baker_print_usage!(arena);
+        sys_exit!(1);
+    ]
+    if (out_path == 0) [
+        baker_print_usage!(arena);
+        sys_exit!(1);
+    ]
+
+    in_len = baker_str_len(in_path);
+
+    is_tape = baker_has_ext(in_path, in_len, 116, 97, 112, 101);
+    if (is_tape == 1) [
+        res = bake_tape_to_stape!(in_path, out_path, arena);
+        sys_exit!(res);
+    ]
+
+    is_tile = baker_has_ext(in_path, in_len, 116, 105, 108, 101);
+    if (is_tile == 1) [
+        res = bake_tile_to_stile!(in_path, out_path, arena);
+        sys_exit!(res);
+    ]
+
+    res = bake_ppm_to_stile!(in_path, out_path, arena);
+    sys_exit!(res);
+]

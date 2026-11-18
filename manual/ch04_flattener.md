@@ -57,12 +57,11 @@ $$\|V\| \approx \max(|dx|, |dy|) + \frac{1}{2} \min(|dx|, |dy|)$$
 fn bo_octagonal_norm(dx, dy) [
     ax = bo_abs(dx);
     ay = bo_abs(dy);
-    max_d = ax;
-    min_d = ay;
-    if (ay > ax) [
-        max_d = ay;
-        min_d = ax;
-    ]
+    d = ax - ay;
+    m = d >> 63;
+    del = d & m;
+    min_d = ay + del;
+    max_d = ax - del;
     half_min = min_d >> 1;
     res = max_d + half_min;
     ret res;

@@ -7,6 +7,7 @@
 * [Pegboard Vector Tape Protocol](ch03_pegboard.md)
 * [Wang's Dyadic Flattener & Monotonic Slicing](ch04_flattener.md)
 * [The Jacquard Loom Rasterizer (Warp & Weft)](ch05_loom.md)
-* [Typography & Simple MSDF Engine (.sfont)](ch06_msdf.md)
+* [Typography & Simple MSDF Engine (TRG & MSDF)](ch06_msdf.md)
 * [Memory Contracts & Scratch Buffers](ch07_memory.md)
 * [API Reference & Embedding Guide](ch08_embedding.md)
+* [Sovereign Asset Architecture (.stile & .stape)](ch09_assets.md)

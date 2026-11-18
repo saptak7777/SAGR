@@ -76,6 +76,30 @@ SAGR is straightforward to embed in operating system kernels, UEFI bootloaders, 
 
 ---
 
+### Sovereign Asset Helpers (`sassets/pure/`)
+
+#### Micro-Tile Helpers (`sassets/pure/stile.sinc`)
+* `stile_get_dims(stile_ptr)`
+  Extracts the packed 32-bit `(tiles_x << 16) | tiles_y` dimensions from Word 0.
+* `stile_get_tile_ptr(stile_ptr, tile_idx)`
+  Computes the 64-byte aligned pointer to micro-tile `tile_idx` via $64 + (k \ll 10)$.
+* `stile_flush_opaque!(fb_ptr, stile_ptr, tile_idx, tx, ty, stride)`
+  Directly streams an opaque $16 \times 16$ micro-tile into the destination framebuffer (0 blend arithmetic).
+* `stile_composite_tile!(tile_scratch, stile_ptr, tile_idx)`
+  Composites a translucent micro-tile into scratch memory using premultiplied Source-Over.
+
+#### Vector Tape Helpers (`sassets/pure/stape.sinc`)
+* `stape_get_cord_count(stape_ptr)`
+  Extracts the total 32-bit cord count from header Word 0.
+* `stape_get_cords_ptr(stape_ptr)`
+  Returns pointer to the first 32-byte Cord Quad (`stape_ptr + 64`).
+* `stape_reap!(stape_ptr, shutter_mask)`
+  Scans cord tape backwards and culls cords occluded by opaque foreground windows.
+* `stape_weave_tile!(stape_ptr, tx, ty, winding, in_bd, out_bd, warp, cov)`
+  Weaves active cords for tile $(T_x, T_y)$ into sub-pixel coverage with backdrop tension carry.
+
+---
+
 ## 2. Embedding in Bare-Metal UEFI & OS Kernels
 
 Because SAGR has **zero OS syscalls** in its rendering pipeline, it can run directly in a bootloader or kernel:

@@ -623,6 +623,233 @@ fi
 
 echo ""
 echo "=================================================================="
+echo "    SOVEREIGN ASSET ARCHITECTURE TESTS (.stile & .stape)          "
+echo "=================================================================="
+
+# 1. Merge sources into test bundle
+cat steel/sys/sys.sinc \
+    steel/sys/arena.sinc \
+    steel/pure/bitset.sinc \
+    sagr/data/surface.sinc \
+    sagr/pure/bitops.sinc \
+    sagr/pure/flattener.sinc \
+    sagr/pure/heddle.sinc \
+    sagr/pure/loom.sinc \
+    sagr/sys/slsp.sinc \
+    sassets/data/asset_defs.sinc \
+    sassets/pure/stile.sinc \
+    sassets/pure/stape.sinc \
+    sassets/pure/bake_lexer.sinc \
+    sassets/sys/bake_io.sinc \
+    sassets/sys/bake_ppm.sinc \
+    sassets/sys/bake_tile.sinc \
+    sassets/sys/bake_tape.sinc \
+    tests/test_assets.sinc > scratch/assets_test_bundle.sinc
+
+# 2. Compile via SINC Native Compiler
+printf "[BUILD] Compiling Asset test suite via sinc.elf... "
+./bin/sinc.elf scratch/assets_test_bundle.sinc scratch/assets_test.safe
+echo "OK"
+
+# 3. Package into Standalone ELF Binary
+printf "[BUILD] Packaging standalone ELF via packager_bin... "
+./bin/packager_bin scratch/assets_test.safe ./scratch/test_assets_bin
+chmod +x ./scratch/test_assets_bin
+echo "OK"
+
+# 4. Execute Test Binary
+echo ""
+echo "--- Running Subsystem Assertions ---"
+
+ASSET_TEST_NAMES=(
+    "Test 1: Sovereign asset 64-byte header contract & L1 alignment"
+    "Test 2: Direct opaque micro-tile beam flush (0 blend arithmetic)"
+    "Test 3: Translucent micro-tile Source-Over composite"
+    "Test 4: Solid micro-tile vector broadcast from header"
+    "Test 5: Vector cord shutter culling (EFFECT_SHUTTER = 2)"
+    "Test 6: Premultiplied alpha bounded channel invariant (Out <= 255)"
+    "Test 7: Zero-overhead O(1) micro-tile memory addressing"
+    "Test 8: Simplified stile_get_dims 32-bit direct mask verification"
+    "Test 9: Rect shutter interior stamping & occlusion reaper"
+    "Test 10: .tile RGBA 4-state micro-tile layout & premultiplication"
+    "Test 11: .tape Wang quadratic Bézier flattening & horizontal culling"
+    "Test 12: Lexer hex nibbles, whitespace skipping, and EOF clamping"
+    "Test 13: Declarative style parser (pure vs. shutter vector cords)"
+    "Test 14: Sovereign file writer unopenable output error path (ret 4)"
+    "Test 15: End-to-end .stile opaque beam flush & translucent composite"
+    "Test 16: End-to-end .stape shutter reap occlusion & backdrop weave"
+)
+
+set +e
+./scratch/test_assets_bin
+ASSET_EXIT=$?
+set -e
+
+if [ $ASSET_EXIT -ne 0 ]; then
+    FAIL_IDX=$((ASSET_EXIT - 101))
+    if [ $FAIL_IDX -ge 0 ] && [ $FAIL_IDX -lt ${#ASSET_TEST_NAMES[@]} ]; then
+        printf "  %-75s [FAIL - CODE %d]\n" "${ASSET_TEST_NAMES[$FAIL_IDX]}" "$ASSET_EXIT"
+    else
+        printf "  %-75s [FAIL - CODE %d]\n" "Asset Test Suite Failure" "$ASSET_EXIT"
+    fi
+    exit 1
+else
+    for name in "${ASSET_TEST_NAMES[@]}"; do
+        printf "  %-75s [PASS]\n" "$name"
+    done
+fi
+
+echo ""
+echo "=================================================================="
+echo "  RESULT: ALL 16/16 SOVEREIGN ASSET TESTS PASSED BIT-PERFECT (EXIT 0)"
+echo "=================================================================="
+
+# 5. Sovereign Asset Compiler Verification (bin/sagr-bake built via sassets/build.staff)
+echo ""
+echo "--- Building Pure SINC Asset Compiler via staff (bin/sagr-bake) ---"
+printf "[BUILD] Compiling sassets package via staff... "
+./bin/staff sassets/build.staff scratch/sagr_bake.safe
+echo "OK"
+printf "[BUILD] Packaging standalone ELF via packager_bin... "
+./bin/packager_bin scratch/sagr_bake.safe ./bin/sagr-bake
+chmod +x ./bin/sagr-bake
+echo "OK"
+
+echo ""
+echo "--- Testing Pure SINC Asset Compiler (bin/sagr-bake) ---"
+if [ -f "./bin/sagr-bake" ]; then
+    printf "[CHECK] Verifying CLI argument validation (0 args -> exit 1)... "
+    set +e
+    ./bin/sagr-bake > /dev/null 2>&1
+    ARG0_EXIT=$?
+    set -e
+    if [ "$ARG0_EXIT" -eq 1 ]; then
+        echo "OK (Usage printed, exit 1)"
+    else
+        echo "FAIL (Unexpected exit: $ARG0_EXIT)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying CLI missing input file error path (exit 1)... "
+    set +e
+    ./bin/sagr-bake scratch/no_such_file.tile scratch/out.stile > /dev/null 2>&1
+    MISS_EXIT=$?
+    set -e
+    if [ "$MISS_EXIT" -eq 1 ]; then
+        echo "OK (Exit 1)"
+    else
+        echo "FAIL (Unexpected exit: $MISS_EXIT)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying CLI empty .tile error path (exit 2)... "
+    echo -n "" > scratch/cli_empty.tile
+    set +e
+    ./bin/sagr-bake scratch/cli_empty.tile scratch/out.stile > /dev/null 2>&1
+    EMPTY_TILE_EXIT=$?
+    set -e
+    if [ "$EMPTY_TILE_EXIT" -eq 2 ]; then
+        echo "OK (Exit 2)"
+    else
+        echo "FAIL (Unexpected exit: $EMPTY_TILE_EXIT)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying CLI .tile missing size: header error path (exit 3)... "
+    echo "tile: 0 0" > scratch/cli_no_size.tile
+    set +e
+    ./bin/sagr-bake scratch/cli_no_size.tile scratch/out.stile > /dev/null 2>&1
+    NO_SIZE_EXIT=$?
+    set -e
+    if [ "$NO_SIZE_EXIT" -eq 3 ]; then
+        echo "OK (Exit 3)"
+    else
+        echo "FAIL (Unexpected exit: $NO_SIZE_EXIT)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying CLI empty .tape error path (exit 2)... "
+    echo -n "" > scratch/cli_empty.tape
+    set +e
+    ./bin/sagr-bake scratch/cli_empty.tape scratch/out.stape > /dev/null 2>&1
+    EMPTY_TAPE_EXIT=$?
+    set -e
+    if [ "$EMPTY_TAPE_EXIT" -eq 2 ]; then
+        echo "OK (Exit 2)"
+    else
+        echo "FAIL (Unexpected exit: $EMPTY_TAPE_EXIT)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying CLI .tape zero cords error path (exit 4)... "
+    echo "style: pure #FF0000FF" > scratch/cli_zero_cords.tape
+    set +e
+    ./bin/sagr-bake scratch/cli_zero_cords.tape scratch/out.stape > /dev/null 2>&1
+    ZERO_CORDS_EXIT=$?
+    set -e
+    if [ "$ZERO_CORDS_EXIT" -eq 4 ]; then
+        echo "OK (Exit 4)"
+    else
+        echo "FAIL (Unexpected exit: $ZERO_CORDS_EXIT)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying CLI non-P6 .ppm magic error path (exit 3)... "
+    echo "P3 1 1 255 0 0 0" > scratch/cli_bad.ppm
+    set +e
+    ./bin/sagr-bake scratch/cli_bad.ppm scratch/out.stile > /dev/null 2>&1
+    BAD_PPM_EXIT=$?
+    set -e
+    if [ "$BAD_PPM_EXIT" -eq 3 ]; then
+        echo "OK (Exit 3)"
+    else
+        echo "FAIL (Unexpected exit: $BAD_PPM_EXIT)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying .stile compilation (PPM -> .stile)... "
+    ./bin/sagr-bake scratch/battle_game_assets/tileset_dungeon.ppm scratch/dungeon_sinc_test.stile > /dev/null 2>&1
+    SIZE_STILE=$(wc -c < scratch/dungeon_sinc_test.stile)
+    if [ "$SIZE_STILE" -eq 1441856 ]; then
+        echo "OK ($SIZE_STILE bytes exact)"
+    else
+        echo "FAIL (Unexpected size: $SIZE_STILE)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying .tile compilation (Human-Readable .tile -> .stile RGBA)... "
+    ./bin/sagr-bake scratch/hero.tile scratch/hero_sinc_test.stile > /dev/null 2>&1
+    SIZE_HERO=$(wc -c < scratch/hero_sinc_test.stile)
+    if [ "$SIZE_HERO" -eq 1088 ]; then
+        echo "OK ($SIZE_HERO bytes exact)"
+    else
+        echo "FAIL (Unexpected size: $SIZE_HERO)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying .stape compilation (TAPE -> .stape)... "
+    ./bin/sagr-bake scratch/test_shutter.tape scratch/tape_sinc_test.stape > /dev/null 2>&1
+    SIZE_STAPE=$(wc -c < scratch/tape_sinc_test.stape)
+    if [ "$SIZE_STAPE" -eq 256 ]; then
+        echo "OK ($SIZE_STAPE bytes exact)"
+    else
+        echo "FAIL (Unexpected size: $SIZE_STAPE)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying Bézier .tape compilation (.tape -> .stape with Wang Quads)... "
+    ./bin/sagr-bake scratch/curve.tape scratch/curve_sinc_test.stape > /dev/null 2>&1
+    SIZE_CURVE=$(wc -c < scratch/curve_sinc_test.stape)
+    if [ "$SIZE_CURVE" -eq 1184 ]; then
+        echo "OK ($SIZE_CURVE bytes exact)"
+    else
+        echo "FAIL (Unexpected size: $SIZE_CURVE)"
+        exit 1
+    fi
+fi
+
+echo ""
+echo "=================================================================="
 echo "                   SAGR TEST SUITE AUDIT SUMMARY                  "
 echo "=================================================================="
 echo "  Phase 1 (Surface & Bitops):                12/12 PASSED"
@@ -633,8 +860,9 @@ echo "  Phase 5 (Heddle Backdrop & Shutter):       12/12 PASSED"
 echo "  Phase 6 (MSDF Typography):                 12/12 PASSED"
 echo "  Phase 7 (Deterministic Golden Oracle):     11/11 PASSED"
 echo "  Standalone Cross-Tile Regression:           1/1  PASSED"
+echo "  Sovereign Assets (.stile & .stape):        16/16 PASSED"
 echo "=================================================================="
-echo "  TOTAL TESTS PASSED:                        84/84 BIT-PERFECT"
+echo "  TOTAL TESTS PASSED:                       100/100 BIT-PERFECT"
 echo "  CORE ENGINE STATUS: 100% CLEAN & VERIFIED (EXIT 0)"
 echo "=================================================================="
 

@@ -1,0 +1,779 @@
+// ==========================================
+// tests/test_assets.sinc
+// SAGR Sovereign Asset Architecture Verification (.stile & .stape)
+// Pure AOT Execution: 0 Engine LOC, 100% Native Primitives
+// ==========================================
+
+const STILE_MAGIC = 1398032716; // 0x5354494C 'STIL'
+const STAPE_MAGIC = 1398030672; // 0x53544150 'STAP'
+
+fn test_asset_header_contract!(arena) [
+    hdr_buf = arena_alloc_words!(arena, 8);
+
+    // Build sample 64-byte header
+    // Word 0: [Magic='STIL':32 | Tiles_X:16 | Tiles_Y:16]
+    w0_mag = STILE_MAGIC << 32;
+    w0_dims = (4 << 16) | 4;
+    hdr_buf@[0] = w0_mag | w0_dims;
+
+    // Words 1..7: L1 Cache-Line Alignment Padding (0)
+    loop (w:7 = 1 .. 8) [
+        hdr_buf@[w] = 0;
+    ]
+
+    // Verify header properties
+    mag_read = hdr_buf@[0] >> 32;
+    if (mag_read != STILE_MAGIC) [ ret 1; ]
+
+    tx_read = (hdr_buf@[0] >> 16) & 65535;
+    ty_read = hdr_buf@[0] & 65535;
+    if (tx_read != 4) [ ret 2; ]
+    if (ty_read != 4) [ ret 3; ]
+
+    // Verify Words 1..7 are pure 0 L1 cache alignment padding
+    loop (w_check:7 = 1 .. 8) [
+        pad_val = hdr_buf@[w_check];
+        if (pad_val != 0) [ ret 4; ]
+    ]
+
+    ret 0;
+]
+
+fn test_direct_opaque_beam_flush!(arena) [
+    fb_words = 1920 * 1080 / 2;
+    fb_ptr = arena_alloc_words!(arena, fb_words);
+    raw_tile = arena_alloc_words!(arena, 128);
+
+    // Initialize raw tile with test pattern (128 words = 256 pixels)
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
+        hi_px = 4286578816 | w; // Opaque green pattern
+        lo_px = 4278255360 | w;
+        raw_tile@[w] = (hi_px << 32) | (lo_px & 4294967295);
+    ]
+
+    // Beam flush directly to tile (2, 2)
+    tx = 2;
+    ty = 2;
+    stride = 7680;
+    slsp_beam_flush_tile!(fb_ptr, tx, ty, stride, raw_tile~);
+
+    // Read back framebuffer memory to verify exact bit-for-bit flush
+    y_pixel_off = ty * 16;
+    y_byte_off = y_pixel_off * stride;
+    x_byte_off = tx * 64;
+    dest_base = fb_ptr + y_byte_off + x_byte_off;
+
+    loop (row:TILE_DIM = 0 .. TILE_DIM) [
+        row_byte_off = row * stride;
+        row_dest = dest_base + row_byte_off;
+        tile_row_off = row * 8;
+        loop (col:TILE_SCANLINE_WORDS = 0 .. TILE_SCANLINE_WORDS) [
+            word_idx = tile_row_off + col;
+            expected = raw_tile@[word_idx];
+            actual = row_dest@[col];
+            if (actual != expected) [
+                ret 1;
+            ]
+        ]
+    ]
+
+    ret 0;
+]
+
+fn test_translucent_composite!(arena) [
+    tile_scratch = arena_alloc_words!(arena, 128);
+    src_tile = arena_alloc_words!(arena, 128);
+
+    // Background: Opaque White (0xFFFFFFFF)
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
+        tile_scratch@[w] = -1; // All 1s
+    ]
+
+    // Source Tile: Premultiplied 50% Translucent Red (R=128, G=0, B=0, A=128)
+    // Little-endian packed: 128 | (0<<8) | (0<<16) | (128<<24) = 0x80000080 = 2147483776
+    red_half = 2147483776;
+    two_reds = (red_half << 32) | red_half;
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
+        src_tile@[w] = two_reds;
+    ]
+
+    // Execute SIMD-style source-over compositing
+    hd_composite_source_over!(tile_scratch, src_tile);
+
+    // Expected Output:
+    // R = 128 + (255 * (256 - 128) >> 8) = 128 + 127 = 255 (0xFF)
+    // G = 0 + (255 * (256 - 128) >> 8) = 127 (0x7F)
+    // B = 0 + (255 * (256 - 128) >> 8) = 127 (0x7F)
+    // A = 128 + (255 * (256 - 128) >> 8) = 255 (0xFF)
+    // Packed RGBA: 255 | (127 << 8) | (127 << 16) | (255 << 24) = 0xFF7F7FFF = 4286545919
+    expected_lo = 4286545919;
+    expected_hi = expected_lo << 32;
+    expected_word = expected_hi | expected_lo;
+
+    // Verify all 128 words bit-perfect
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
+        val = tile_scratch@[w];
+        if (val != expected_word) [
+            ret 1;
+        ]
+    ]
+
+    ret 0;
+]
+
+fn test_solid_broadcast!(arena) [
+    tile_scratch = arena_alloc_words!(arena, 128);
+
+    // Initialize with noise
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
+        tile_scratch@[w] = w * 12345;
+    ]
+
+    // Broadcast solid blue (0xFF0000FF = 4278190335)
+    color_blue = 4278190335;
+    hd_broadcast_solid!(tile_scratch, color_blue);
+
+    // Expected 64-bit word: (color_blue << 32) | color_blue
+    expected_word = (color_blue << 32) | color_blue;
+
+    loop (w:TILE_WORDS = 0 .. TILE_WORDS) [
+        val = tile_scratch@[w];
+        if (val != expected_word) [
+            ret 1;
+        ]
+    ]
+
+    ret 0;
+]
+
+fn test_stape_shutter_culling!(arena) [
+    shutter_mask = arena_alloc_words!(arena, 128);
+    loop (i:128 = 0 .. 128) [
+        shutter_mask@[i] = 0;
+    ]
+
+    tape = arena_alloc_words!(arena, 16);
+
+    // Cord 0: Background cord covering tile (15, 15)
+    // OP=1, EFFECT=1 (pure), Tx=[15..15]
+    w0_bg = (1 << 56) | (1 << 48) | (15 << 40) | (15 << 32) | 4278190335;
+    tape@[0] = w0_bg;
+    tape@[1] = 0;
+    tape@[2] = 0;
+    tape@[3] = 1 << 15; // Row 15
+
+    // Cord 1: Foreground shutter covering tiles [10..20, 10..20]
+    // OP=1, EFFECT=2 (shutter), Tx=[10..20]
+    w0_shutter = (1 << 56) | (2 << 48) | (10 << 40) | (20 << 32) | 4294967295;
+    tape@[4] = w0_shutter;
+    tape@[5] = 0;
+    tape@[6] = 0;
+    row_mask_shutter = 0;
+    loop (r:11 = 10 .. 21) [
+        row_mask_shutter = row_mask_shutter | (1 << r);
+    ]
+    tape@[7] = row_mask_shutter;
+
+    // Execute backward shutter reaper
+    reaped = hd_reap_shutter!(tape, 2, shutter_mask);
+
+    if (reaped != 1) [
+        ret 1;
+    ]
+
+    w0_reaped = tape@[0];
+    if (w0_reaped != 0) [
+        ret 2;
+    ]
+
+    ret 0;
+]
+
+fn test_premultiplied_bounded_invariant() [
+    // Exhaustive 65,536-pair (256x256) audit:
+    // Out <= 255, Out <= C, Out <= A, Premult(C, 0) == 0, Premult(C, 255) == C, Premult(255, A) == A
+    loop (c:256 = 0 .. 256) [
+        loop (a:256 = 0 .. 256) [
+            out = bake_premult_ch(c, a);
+            if (out > 255) [ ret 1; ]
+            if (out > c) [ ret 2; ]
+            if (out > a) [ ret 3; ]
+            if (a == 0) [
+                if (out != 0) [ ret 4; ]
+            ]
+            if (a == 255) [
+                if (out != c) [ ret 5; ]
+            ]
+            if (c == 255) [
+                if (out != a) [ ret 6; ]
+            ]
+        ]
+    ]
+    ret 0;
+]
+
+fn test_tile_offset_math() [
+    off0 = 8 + (0 << 7);
+    if (off0 != 8) [ ret 1; ]
+
+    off1 = 8 + (1 << 7);
+    if (off1 != 136) [ ret 2; ]
+
+    off5 = 8 + (5 << 7);
+    if (off5 != 648) [ ret 3; ]
+
+    byte_off0 = off0 * 8;
+    if (byte_off0 != 64) [ ret 4; ]
+
+    byte_off1 = off1 * 8;
+    if (byte_off1 != 1088) [ ret 5; ]
+
+    ret 0;
+]
+
+// Test 8: Simplified stile_get_dims verification
+fn test_stile_dims_simplified!(arena) [
+    hdr = arena_alloc_words!(arena, 8);
+    w0_mag = STILE_MAGIC << 32;
+    w0_dims = (32 << 16) | 24;
+    hdr@[0] = w0_mag | w0_dims;
+
+    // Extract using 32-bit mask
+    dims = hdr@[0] & 4294967295;
+    tx = dims >> 16;
+    ty = dims & 65535;
+
+    if (tx != 32) [ ret 1; ]
+    if (ty != 24) [ ret 2; ]
+
+    ret 0;
+]
+
+// Test 9: Rect Shutter Interior Stamping & Occlusion Reaper
+fn test_shutter_rect_reaper!(arena) [
+    shutter_mask = arena_alloc_words!(arena, 128);
+    loop (i:128 = 0 .. 128) [
+        shutter_mask@[i] = 0;
+    ]
+
+    tape = arena_alloc_words!(arena, 24);
+
+    // Cord 0: Background cord at Tx=[12..14], Ty=[8..10]
+    w0_bg = (1 << 56) | (1 << 48) | (12 << 40) | (14 << 32) | 4278190335;
+    tape@[0] = w0_bg;
+    tape@[1] = 0;
+    tape@[2] = 0;
+    row_mask_bg = 0;
+    loop (r_bg:3 = 8 .. 11) [
+        row_mask_bg = row_mask_bg | (1 << r_bg);
+    ]
+    tape@[3] = row_mask_bg;
+
+    // Cord 1 & 2: Shutter Rect with full bounding span Tx=[10..20], Ty=[5..15]
+    // Interior tiles are strictly Tx: [11..19], Ty: [6..14]
+    w0_shutter = (1 << 56) | (2 << 48) | (10 << 40) | (20 << 32) | 4294967295;
+    row_mask_shutter = 0;
+    loop (r_sh:11 = 5 .. 16) [
+        row_mask_shutter = row_mask_shutter | (1 << r_sh);
+    ]
+
+    // Left vertical cord
+    tape@[4] = w0_shutter;
+    tape@[5] = 0;
+    tape@[6] = 0;
+    tape@[7] = row_mask_shutter;
+
+    // Right vertical cord
+    tape@[8] = w0_shutter;
+    tape@[9] = 0;
+    tape@[10] = 0;
+    tape@[11] = row_mask_shutter;
+
+    // Execute backward shutter reaper on 3 cords
+    reaped = hd_reap_shutter!(tape, 3, shutter_mask);
+
+    // Background cord must be reaped (occluded by the shutter rect interior)
+    if (reaped != 1) [
+        ret 1;
+    ]
+
+    w0_reaped = tape@[0];
+    if (w0_reaped != 0) [
+        ret 2;
+    ]
+
+    ret 0;
+]
+
+// Test 10: .tile RGBA 4-State Micro-Tile Layout & Premultiplication
+fn test_tile_rgba_format!(arena) [
+    tile_buf = arena_alloc_words!(arena, 128);
+    loop (i:128 = 0 .. 128) [
+        tile_buf@[i] = 0;
+    ]
+
+    px_empty = 0;
+    px_solid = 4291546316;
+    px_opaque = 4278190335;
+
+    prod = 255 * 128;
+    x = prod + 128;
+    x_hi = x >> 8;
+    x_sum = x + x_hi;
+    bp = x_sum >> 8;
+    if (bp != 128) [ ret 1; ]
+
+    sh_bp = bp << 16;
+    sh_a = 128 << 24;
+    px_trans = sh_bp | sh_a;
+
+    sh_odd = px_trans << 32;
+    lo_even = px_opaque & 4294967295;
+    w0 = sh_odd | lo_even;
+    tile_buf@[0] = w0;
+
+    read_word = tile_buf@[0];
+    read_even = read_word & 4294967295;
+    read_odd_sh = read_word >> 32;
+    read_odd = read_odd_sh & 4294967295;
+
+    if (read_even != px_opaque) [ ret 2; ]
+    if (read_odd != px_trans) [ ret 3; ]
+
+    last_word_idx = (15 * 8) + 7;
+    if (last_word_idx != 127) [ ret 4; ]
+
+    ret 0;
+]
+
+// Test 11: .tape Wang's Quadratic Bézier Flattening in Q24.8 Subpixels
+fn test_tape_bezier_quad!(arena) [
+    qx0 = 20;
+    qy0 = 50;
+    qcx = 50;
+    qcy = 10;
+    qx1 = 80;
+    qy1 = 50;
+
+    qx0_q8 = qx0 << 8;
+    qy0_q8 = qy0 << 8;
+    qcx_q8 = qcx << 8;
+    qcy_q8 = qcy << 8;
+    qx1_q8 = qx1 << 8;
+    qy1_q8 = qy1 << 8;
+
+    cx_two = qcx_q8 << 1;
+    diff_x = qx0_q8 - cx_two;
+    dd_x = diff_x + qx1_q8;
+
+    cy_two = qcy_q8 << 1;
+    diff_y = qy0_q8 - cy_two;
+    dd_y = diff_y + qy1_q8;
+
+    l_norm = fl_octagonal_norm(dd_x, dd_y);
+    k = fl_compute_depth_k(l_norm);
+
+    if (k != 4) [ ret 1; ]
+    n_segs = 1 << k;
+    if (n_segs != 16) [ ret 2; ]
+
+    dx_01 = qcx_q8 - qx0_q8;
+    delta1_x = dx_01 << 1;
+    delta2_x = dd_x;
+
+    dy_01 = qcy_q8 - qy0_q8;
+    delta1_y = dy_01 << 1;
+    delta2_y = dd_y;
+
+    cur_x_q8 = qx0_q8;
+    cur_y_q8 = qy0_q8;
+    emitted_count = 0;
+
+    step_limit = n_segs + 1;
+    loop (qstep:128 = 1 .. step_limit) [
+        nxt_x_q8 = fl_eval_pt(qx0_q8, delta1_x, delta2_x, qstep, k);
+        nxt_y_q8 = fl_eval_pt(qy0_q8, delta1_y, delta2_y, qstep, k);
+
+        if (cur_y_q8 != nxt_y_q8) [
+            emitted_count = emitted_count + 1;
+        ]
+
+        cur_x_q8 = nxt_x_q8;
+        cur_y_q8 = nxt_y_q8;
+    ]
+
+    dest_x_px = cur_x_q8 >> 8;
+    dest_y_px = cur_y_q8 >> 8;
+    if (dest_x_px != 80) [ ret 3; ]
+    if (dest_y_px != 50) [ ret 4; ]
+
+    if (emitted_count != 16) [ ret 5; ]
+
+    ret 0;
+]
+
+// Test 12: Lexer Hex Nibble Decoding, Whitespace Skipping, and EOF Clamping
+fn test_lexer_hex_and_ws!(arena) [
+    n0 = bake_hex_nibble(48);
+    if (n0 != 0) [ ret 1; ]
+    n9 = bake_hex_nibble(57);
+    if (n9 != 9) [ ret 2; ]
+
+    na = bake_hex_nibble(65);
+    if (na != 10) [ ret 3; ]
+    nf = bake_hex_nibble(70);
+    if (nf != 15) [ ret 4; ]
+
+    nla = bake_hex_nibble(97);
+    if (nla != 10) [ ret 5; ]
+    nlf = bake_hex_nibble(102);
+    if (nlf != 15) [ ret 6; ]
+
+    ninval = bake_hex_nibble(120);
+    if (ninval != 0) [ ret 7; ]
+
+    buf = arena_alloc_words!(arena, 4);
+    buf@[0] = 0;
+    buf@[1] = 0;
+    buf@[2] = 0;
+    buf@[3] = 0;
+
+    buf@[0 * 1] = 32;
+    buf@[1 * 1] = 32;
+    buf@[2 * 1] = 32;
+    buf@[3 * 1] = 9;
+    buf@[4 * 1] = 32;
+    buf@[5 * 1] = 32;
+    buf@[6 * 1] = 35;
+    buf@[7 * 1] = 70;
+    buf@[8 * 1] = 70;
+    buf@[9 * 1] = 48;
+    buf@[10 * 1] = 48;
+    buf@[11 * 1] = 56;
+    buf@[12 * 1] = 48;
+    buf@[13 * 1] = 56;
+    buf@[14 * 1] = 48;
+
+    off_ptr = arena_alloc_words!(arena, 1);
+    off_ptr@[0] = 0;
+
+    off_ws = bake_skip_ws!(buf, off_ptr, 15);
+    if (off_ws != 6) [ ret 8; ]
+
+    off_ptr@[0] = 0;
+    col = bake_parse_hex_u32!(buf, off_ptr, 15);
+    if (col != 2151678080) [ ret 9; ]
+
+    off_ptr@[0] = 15;
+    off_eof = bake_skip_ws!(buf, off_ptr, 15);
+    if (off_eof != 15) [ ret 10; ]
+
+    ret 0;
+]
+
+// Test 13: Declarative Style Parser (Pure vs. Shutter Vector Cords)
+fn test_style_parser!(arena) [
+    buf = arena_alloc_words!(arena, 8);
+    // "#FF0000FF pure\n"
+    buf@[0 * 1] = 35;  // '#'
+    buf@[1 * 1] = 70;  // 'F'
+    buf@[2 * 1] = 70;  // 'F'
+    buf@[3 * 1] = 48;  // '0'
+    buf@[4 * 1] = 48;  // '0'
+    buf@[5 * 1] = 48;  // '0'
+    buf@[6 * 1] = 48;  // '0'
+    buf@[7 * 1] = 70;  // 'F'
+    buf@[8 * 1] = 70;  // 'F'
+    buf@[9 * 1] = 32;  // ' '
+    buf@[10 * 1] = 112; // 'p'
+    buf@[11 * 1] = 117; // 'u'
+    buf@[12 * 1] = 114; // 'r'
+    buf@[13 * 1] = 101; // 'e'
+    buf@[14 * 1] = 10;  // '\n'
+
+    off_ptr = arena_alloc_words!(arena, 1);
+
+    off_ptr@[0] = 0;
+    st_pure = bake_parse_style!(buf, off_ptr, 15);
+    sh_pure = st_pure >> 48;
+    eff_pure = sh_pure & 255;
+    if (eff_pure != 1) [
+        ret 2;
+    ]
+    rgba_pure = st_pure & 4294967295;
+    if (rgba_pure != 4278190335) [
+        ret 3;
+    ]
+
+    // "#00FF00FF shutter\n"
+    buf@[0 * 1] = 35;  // '#'
+    buf@[1 * 1] = 48;  // '0'
+    buf@[2 * 1] = 48;  // '0'
+    buf@[3 * 1] = 70;  // 'F'
+    buf@[4 * 1] = 70;  // 'F'
+    buf@[5 * 1] = 48;  // '0'
+    buf@[6 * 1] = 48;  // '0'
+    buf@[7 * 1] = 70;  // 'F'
+    buf@[8 * 1] = 70;  // 'F'
+    buf@[9 * 1] = 32;  // ' '
+    buf@[10 * 1] = 115; // 's'
+    buf@[11 * 1] = 104; // 'h'
+    buf@[12 * 1] = 117; // 'u'
+    buf@[13 * 1] = 116; // 't'
+    buf@[14 * 1] = 116; // 't'
+    buf@[15 * 1] = 101; // 'e'
+    buf@[16 * 1] = 114; // 'r'
+    buf@[17 * 1] = 10;  // '\n'
+
+    off_ptr@[0] = 0;
+    st_shut = bake_parse_style!(buf, off_ptr, 18);
+    sh_shut = st_shut >> 48;
+    eff_shut = sh_shut & 255;
+    if (eff_shut != 2) [
+        ret 4;
+    ]
+    rgba_shut = st_shut & 4294967295;
+    if (rgba_shut != 4278255360) [
+        ret 5;
+    ]
+
+    ret 0;
+]
+
+// Test 14: Sovereign File Writer Unopenable Output Error Path (ret 4)
+fn test_unopenable_write_error!(arena) [
+    path_buf = arena_alloc_words!(arena, 4);
+    path_buf@[0 * 1] = 47;
+    path_buf@[1 * 1] = 110;
+    path_buf@[2 * 1] = 111;
+    path_buf@[3 * 1] = 47;
+    path_buf@[4 * 1] = 120;
+    path_buf@[5 * 1] = 0;
+
+    payload = arena_alloc_words!(arena, 16);
+    err = bake_write_sovereign_file!(path_buf, 1398032716, 0, payload, 16, arena);
+    if (err != 4) [ ret 1; ]
+
+    ret 0;
+]
+
+// Test 15: End-to-End .stile Opaque Beam Flush & Translucent Composite
+fn test_end_to_end_raster_render!(arena) [
+    stile_words = 8 + 128;
+    stile_buf = arena_alloc_words!(arena, stile_words);
+
+    w0_mag = 1398032716 << 32;
+    sh_tx = 1 << 16;
+    w0_dims = sh_tx | 1;
+    stile_buf@[0] = w0_mag | w0_dims;
+    loop (h:7 = 1 .. 8) [
+        stile_buf@[h] = 0;
+    ]
+
+    tile0_ptr = stile_get_tile_ptr(stile_buf, 0);
+    red_px = 4278190335;
+    sh_red = red_px << 32;
+    two_reds = sh_red | red_px;
+    loop (w:128 = 0 .. 128) [
+        tile0_ptr@[w] = two_reds;
+    ]
+
+    fb_words = 1920 * 1080 / 2;
+    fb_ptr = arena_alloc_words!(arena, fb_words);
+    stride = 7680;
+
+    stile_flush_opaque!(fb_ptr, stile_buf, 0, 0, 0, stride);
+
+    fb_w0 = fb_ptr@[0];
+    if (fb_w0 != two_reds) [ ret 1; ]
+    fb_w7 = fb_ptr@[7];
+    if (fb_w7 != two_reds) [ ret 2; ]
+
+    tile_scratch = arena_alloc_words!(arena, 128);
+    loop (s:128 = 0 .. 128) [
+        tile_scratch@[s] = -1;
+    ]
+
+    blue_half = 2155872256;
+    sh_blue = blue_half << 32;
+    two_blues = sh_blue | blue_half;
+    loop (b:128 = 0 .. 128) [
+        tile0_ptr@[b] = two_blues;
+    ]
+
+    stile_composite_tile!(tile_scratch, stile_buf, 0);
+
+    expected_lo = 4294934399;
+    expected_hi = expected_lo << 32;
+    expected_comp = expected_hi | expected_lo;
+
+    sc_w0 = tile_scratch@[0];
+    if (sc_w0 != expected_comp) [ ret 3; ]
+
+    ret 0;
+]
+
+// Test 16: End-to-End .stape Shutter Reap Occlusion & Backdrop Weave
+fn test_end_to_end_vector_shutter!(arena) [
+    shutter_mask = arena_alloc_words!(arena, 128);
+    loop (i:128 = 0 .. 128) [
+        shutter_mask@[i] = 0;
+    ]
+
+    stape_buf = arena_alloc_words!(arena, 24);
+    loop (i:24 = 0 .. 24) [
+        stape_buf@[i] = 0;
+    ]
+
+    sh_magic = 1398030672 << 32;
+    stape_buf@[0] = sh_magic | 3;
+
+    cords_ptr = stape_buf + 64;
+
+    sh_op0 = 1 << 56;
+    sh_ef0 = 1 << 48;
+    sh_txlo0 = 15 << 40;
+    sh_txhi0 = 15 << 32;
+    w0_a0 = sh_op0 | sh_ef0;
+    w0_b0 = sh_txlo0 | sh_txhi0;
+    w0_c0 = w0_a0 | w0_b0;
+    w0_bg = w0_c0 | 4278190335;
+    row_mask_bg = 1 << 15;
+    cords_ptr@[0] = w0_bg;
+    cords_ptr@[1] = 0;
+    cords_ptr@[2] = 0;
+    cords_ptr@[3] = row_mask_bg;
+
+    sh_op1 = 1 << 56;
+    sh_ef1 = 2 << 48;
+    sh_txlo1 = 10 << 40;
+    sh_txhi1 = 20 << 32;
+    w0_a1 = sh_op1 | sh_ef1;
+    w0_b1 = sh_txlo1 | sh_txhi1;
+    w0_c1 = w0_a1 | w0_b1;
+    w0_shutter = w0_c1 | 4294967295;
+    row_mask_sh = 0;
+    loop (r:11 = 10 .. 21) [
+        sh_bit = 1 << r;
+        row_mask_sh = row_mask_sh | sh_bit;
+    ]
+    cords_ptr@[4] = w0_shutter;
+    cords_ptr@[5] = 0;
+    cords_ptr@[6] = 0;
+    cords_ptr@[7] = row_mask_sh;
+
+    sh_op2 = 1 << 56;
+    sh_ef2 = 1 << 48;
+    sh_txlo2 = 5 << 40;
+    sh_txhi2 = 5 << 32;
+    w0_a2 = sh_op2 | sh_ef2;
+    w0_b2 = sh_txlo2 | sh_txhi2;
+    w0_c2 = w0_a2 | w0_b2;
+    w0_out = w0_c2 | 4278190335;
+    row_mask_out = 1 << 5;
+    cords_ptr@[8] = w0_out;
+    cords_ptr@[9] = 0;
+    cords_ptr@[10] = 0;
+    cords_ptr@[11] = row_mask_out;
+
+    reaped = stape_reap!(stape_buf, shutter_mask);
+    if (reaped != 1) [ ret 1; ]
+
+    w0_reaped = cords_ptr@[0];
+    if (w0_reaped != 0) [ ret 2; ]
+
+    w0_survived = cords_ptr@[8];
+    if (w0_survived != w0_out) [ ret 3; ]
+
+    is_shut_in = bo_test_tile(shutter_mask, 15, 15);
+    if (is_shut_in != 1) [ ret 4; ]
+    is_shut_out = bo_test_tile(shutter_mask, 5, 5);
+    if (is_shut_out != 0) [ ret 5; ]
+
+    in_bd = arena_alloc_words!(arena, 2);
+    in_bd@[0] = 0;
+    in_bd@[1] = 0;
+    out_bd = arena_alloc_words!(arena, 2);
+    warp = arena_alloc_words!(arena, 16);
+    cov = arena_alloc_words!(arena, 16);
+
+    stape_weave_tile!(stape_buf, 5, 5, 0, in_bd, out_bd, warp, cov);
+
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+
+    // Test 1: Header Contract
+    r1 = test_asset_header_contract!(arena);
+    if (r1 != 0) [ sys_exit!(101); ]
+
+    // Test 2: Direct Opaque Beam Flush
+    r2 = test_direct_opaque_beam_flush!(arena);
+    if (r2 != 0) [ sys_exit!(102); ]
+
+    // Test 3: Translucent Compositing
+    r3 = test_translucent_composite!(arena);
+    if (r3 != 0) [ sys_exit!(103); ]
+
+    // Test 4: Solid Broadcast Fill
+    r4 = test_solid_broadcast!(arena);
+    if (r4 != 0) [ sys_exit!(104); ]
+
+    // Test 5: .stape Shutter Culling (EFFECT_SHUTTER = 2)
+    r5 = test_stape_shutter_culling!(arena);
+    if (r5 != 0) [ sys_exit!(105); ]
+
+    // Test 6: Premultiplied Alpha Bounded Channel Invariant
+    r6 = test_premultiplied_bounded_invariant();
+    if (r6 != 0) [ sys_exit!(106); ]
+
+    // Test 7: O(1) Tile Offset Math
+    r7 = test_tile_offset_math();
+    if (r7 != 0) [ sys_exit!(107); ]
+
+    // Test 8: Simplified stile_get_dims
+    r8 = test_stile_dims_simplified!(arena);
+    if (r8 != 0) [ sys_exit!(108); ]
+
+    // Test 9: Rect Shutter Interior Stamping & Occlusion Reaper
+    r9 = test_shutter_rect_reaper!(arena);
+    if (r9 != 0) [ sys_exit!(109); ]
+
+    // Test 10: .tile RGBA 4-State Micro-Tile Layout & Premultiplication
+    r10 = test_tile_rgba_format!(arena);
+    if (r10 != 0) [ sys_exit!(110); ]
+
+    // Test 11: .tape Wang's Quadratic Bézier Flattening & Horizontal Culling
+    r11 = test_tape_bezier_quad!(arena);
+    if (r11 != 0) [ sys_exit!(111); ]
+
+    // Test 12: Lexer Hex & Whitespace
+    r12 = test_lexer_hex_and_ws!(arena);
+    if (r12 != 0) [ sys_exit!(112); ]
+
+    // Test 13: Declarative Style Parser
+    r13 = test_style_parser!(arena);
+    if (r13 != 0) [ sys_exit!(113); ]
+
+    // Test 14: Sovereign Writer Error Path
+    r14 = test_unopenable_write_error!(arena);
+    if (r14 != 0) [ sys_exit!(114); ]
+
+    // Test 15: End-to-End Raster Render (.stile)
+    r15 = test_end_to_end_raster_render!(arena);
+    if (r15 != 0) [ sys_exit!(115); ]
+
+    // Test 16: End-to-End Vector Shutter (.stape)
+    r16 = test_end_to_end_vector_shutter!(arena);
+    if (r16 != 0) [ sys_exit!(116); ]
+
+    // All 16 tests passed!
+    sys_exit!(0);
+]

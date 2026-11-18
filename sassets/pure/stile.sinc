@@ -1,0 +1,29 @@
+// ==========================================
+// sassets/pure/stile.sinc
+// Sovereign Micro-Tile Helpers (Exact Byte Offsets)
+// ==========================================
+
+fn stile_get_tile_ptr(stile_ptr, tile_idx) [
+    tile_bytes = tile_idx << 10;
+    byte_off = 64 + tile_bytes;
+    tile_ptr = stile_ptr + byte_off;
+    ret tile_ptr;
+]
+
+fn stile_flush_opaque!(fb_ptr, stile_ptr, tile_idx, tx, ty, stride) [
+    tile_ptr = stile_get_tile_ptr(stile_ptr, tile_idx);
+    slsp_beam_flush_tile!(fb_ptr, tx, ty, stride, tile_ptr~);
+    ret 0;
+]
+
+fn stile_composite_tile!(tile_scratch, stile_ptr, tile_idx) [
+    tile_ptr = stile_get_tile_ptr(stile_ptr, tile_idx);
+    hd_composite_source_over!(tile_scratch, tile_ptr);
+    ret 0;
+]
+
+fn stile_get_dims(stile_ptr) [
+    w0 = stile_ptr@[0];
+    res = w0 & 4294967295;
+    ret res;
+]

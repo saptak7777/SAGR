@@ -1,0 +1,29 @@
+// ==========================================
+// sassets/pure/stape.sinc
+// Sovereign Vector Tape Helpers (Tension Carry Preserved)
+// ==========================================
+
+fn stape_get_cord_count(stape_ptr) [
+    w0 = stape_ptr@[0];
+    cord_count = w0 & 4294967295;
+    ret cord_count;
+]
+
+fn stape_get_cords_ptr(stape_ptr) [
+    cords_ptr = stape_ptr + 64;
+    ret cords_ptr;
+]
+
+fn stape_reap!(stape_ptr, shutter_mask) [
+    cords_ptr = stape_get_cords_ptr(stape_ptr);
+    cord_count = stape_get_cord_count(stape_ptr);
+    reaped = hd_reap_shutter!(cords_ptr, cord_count, shutter_mask);
+    ret reaped;
+]
+
+fn stape_weave_tile!(stape_ptr, tx, ty, winding, in_bd, out_bd, warp, cov) [
+    cords_ptr = stape_get_cords_ptr(stape_ptr);
+    cord_count = stape_get_cord_count(stape_ptr);
+    lm_weave_tile_backdrop!(cords_ptr, cord_count, tx, ty, winding, in_bd, out_bd, warp, cov);
+    ret 0;
+]

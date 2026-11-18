@@ -1,0 +1,138 @@
+// ==========================================
+// sassets/sys/bake_tile.sinc
+// Pure SINC Human-Readable Raster Tile Compiler (.tile -> .stile)
+// Supports Full #RRGGBBAA 4-State Alpha (Empty, Solid, Opaque, Translucent)
+// Zero Libc, Zero Floating Point, Zero Division
+// ==========================================
+
+fn bake_tile_to_stile!(in_path, out_path, arena) [
+    off_scratch = arena_alloc_words!(arena, 2);
+    bytes_read = bake_read_file!(in_path, 4194304, off_scratch~, arena);
+    if (bytes_read < 0) [
+        ret 1;
+    ]
+    if (bytes_read < 1) [
+        ret 2;
+    ]
+    in_buf = off_scratch@[0];
+    off_scratch@[0] = 0;
+
+    // Allocate 256-word palette table (initialized to #00000000)
+    pal_table = arena_alloc_words!(arena, 256);
+    loop (p_init:256 = 0 .. 256) [
+        pal_table@[p_init] = 0;
+    ]
+
+    img_w = 0;
+    img_h = 0;
+    tiles_x = 0;
+    tiles_y = 0;
+    total_tiles = 0;
+    payload_words = 0;
+    payload_buf = 0;
+    cur_row_y = 0;
+
+    parse_active = 1;
+    loop (line_idx:4096 = 0 .. 4096) [
+        if (parse_active == 1) [
+            off = off_scratch@[0];
+            in_b = off < bytes_read;
+            if (in_b == 0) [
+                parse_active = 0;
+            ]
+            if (parse_active == 1) [
+                ch = in_buf@[off * 1];
+
+                // 1. "size: W H" (ch == 115 's')
+                if (ch == 115) [
+                    off5 = off + 5;
+                    off_scratch@[0] = off5;
+                    img_w = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    img_h = bake_parse_int!(in_buf, off_scratch, bytes_read);
+
+                    // Branchless ceiling: (img_w + 15) >> 4
+                    w_pad = img_w + 15;
+                    tiles_x = w_pad >> 4;
+                    h_pad = img_h + 15;
+                    tiles_y = h_pad >> 4;
+
+                    total_tiles = tiles_x * tiles_y;
+                    payload_words = total_tiles * 128;
+                    payload_buf = arena_alloc_words!(arena, payload_words);
+                    loop (pw_init:32768 = 0 .. payload_words) [
+                        payload_buf@[pw_init] = 0;
+                    ]
+                ]
+
+                // 2. "pal: <char> <#RRGGBBAA>" (ch == 112 'p')
+                if (ch == 112) [
+                    off4 = off + 4;
+                    off_scratch@[0] = off4;
+                    off_p = bake_skip_ws!(in_buf, off_scratch, bytes_read);
+                    pal_char = in_buf@[off_p * 1];
+                    off_p = off_p + 1;
+                    off_scratch@[0] = off_p;
+                    pal_rgba = bake_parse_hex_u32!(in_buf, off_scratch, bytes_read);
+
+                    char_idx = pal_char & 255;
+                    pal_table@[char_idx] = pal_rgba;
+                ]
+
+                // 3. "row: <chars...>" (ch == 114 'r')
+                if (ch == 114) [
+                    off4 = off + 4;
+                    off_scratch@[0] = off4;
+                    off_r = bake_skip_ws!(in_buf, off_scratch, bytes_read);
+
+                    if (payload_buf != 0) [
+                        ty = cur_row_y >> 4;
+                        t_row = ty * tiles_x;
+                        rel_y = cur_row_y & 15;
+                        rel_y_off = rel_y * 8;
+                        w_pairs_pad = img_w + 1;
+                        w_pairs = w_pairs_pad >> 1;
+
+                        loop (c_pair:1024 = 0 .. w_pairs) [
+                            col0 = c_pair << 1;
+                            col1 = col0 + 1;
+                            r_off0 = off_r + col0;
+                            r_off1 = off_r + col1;
+                            px0_char = in_buf@[r_off0 * 1];
+                            px1_char = in_buf@[r_off1 * 1];
+                            c0 = px0_char & 255;
+                            c1 = px1_char & 255;
+                            p0 = pal_table@[c0];
+                            p1 = pal_table@[c1];
+                            sh_p1 = p1 << 32;
+                            lo_p0 = p0 & 4294967295;
+                            word_val = sh_p1 | lo_p0;
+
+                            tx = col0 >> 4;
+                            rel_x = col0 & 15;
+                            c_sub = rel_x >> 1;
+                            tile_k = t_row + tx;
+                            k_base = tile_k * 128;
+                            w_row = k_base + rel_y_off;
+                            w_idx = w_row + c_sub;
+                            payload_buf@[w_idx] = word_val;
+                        ]
+                        cur_row_y = cur_row_y + 1;
+                    ]
+
+                    off_scratch@[0] = off_r;
+                ]
+
+                bake_skip_to_nl!(in_buf, off_scratch, bytes_read);
+            ]
+        ]
+    ]
+
+    if (total_tiles < 1) [
+        ret 3;
+    ]
+
+    sh_tx = tiles_x << 16;
+    w0_dims = sh_tx | tiles_y;
+    res = bake_write_sovereign_file!(out_path, BAKE_STILE_MAGIC, w0_dims, payload_buf, payload_words, arena);
+    ret res;
+]

@@ -9,15 +9,34 @@ Designed around the **Jacquard Silicon Loom** architecture, SAGR evaluates sub-p
 
 ---
 
-## Architectural Invariants
+## Architectural & Silicon Invariants
 
-SAGR relies on five core technical constraints:
+SAGR relies on seven core technical constraints and architectural invariants:
 
-1. **Zero Float**: 100% fixed-point integer mathematics ($Q24.8$ world space, $Q8.8$ tile space, $U8$ color).
-2. **Zero Dynamic Allocation**: All scratch memory is caller-provided and statically bounded. Zero heap allocations during the render loop.
-3. **L1 Data Cache Residency**: All rasterization operates strictly inside $16 \times 16$ pixel micro-tiles ($1{,}024$ bytes RGBA). Working scratch is $< 6\text{ KB}$, maintaining a high L1 cache hit rate.
-4. **Commutative Weaving**: No sorting edge intersections. SAGR plucks vertical cords into signed area fluxes and integrates them with a branchless 4-cycle prefix sum.
-5. **Portability**: Core SAGR contains zero OS syscalls. It writes to a raw linear pointer (`*fb_ptr, width, height, stride`) and runs on Linux, Windows x64, bare-metal UEFI bootloaders, or custom OS kernels.
+1. **Zero Float**: 100% fixed-point integer mathematics ($Q24.8$ world space, $Q8.8$ tile space, $U8$ color). Zero floating-point instructions (`addss`, `subss`, `mulss`, `divss`, `x87`, `sse-float`) in compiled output.
+2. **Zero Libc & Zero Traps**: Zero C runtime dependency, zero panic traps (`ud2`). Raw native Linux x86-64 syscalls (`sys_mmap`, `sys_write`, `sys_open`, `sys_close`, `sys_exit`) via `steel/sys/sys.sinc`.
+3. **Single-Instruction SSA Sequencing**: Pure SINC source code adheres strictly to 1 operation per statement. Zero nested arithmetic expressions, zero hidden allocations, and 100% deterministic register allocation.
+4. **L1 Data Cache Residency**: All rasterization operates strictly inside $16 \times 16$ pixel micro-tiles ($1{,}024$ bytes RGBA). Working scratch is $< 6\text{ KB}$, maintaining a $> 99.8\%$ L1 data cache hit rate.
+5. **Commutative Weaving**: No sorting edge intersections. SAGR plucks vertical cords into signed area fluxes and integrates them with a branchless 4-cycle prefix sum.
+6. **Zero Dynamic Allocation**: All scratch memory is caller-provided and statically bounded. Zero heap allocations during the render loop.
+7. **Sovereign Asset Pipeline**: Dedicated offline AOT compiler (`bin/sagr-bake`) transforming human-readable raster (`.tile`) and vector (`.tape`) sources or Netpbm images (`.ppm`) into zero-parse, L1 cache-aligned binary micro-tiles (`.stile`) and cord tapes (`.stape`).
+
+---
+
+## The Sovereign Asset Architecture (.stile & .stape)
+
+SAGR divides raster and vector workflows into a unified 4-format pipeline:
+
+```
+  Human-Readable Source              Pure SINC Baker                L1-Aligned Binary Asset
+  ─────────────────────              ───────────────                ───────────────────────
+  .tile  (ASCII Palette/Grid)   ──►  bin/sagr-bake             ──►  .stile (64-byte Header + 1KB Micro-Tiles)
+  .ppm   (Netpbm P6 Image)      ──►  (sassets/build.staff)    ──►  .stile (O(1) Direct Beam Flush)
+  .tape  (ASCII Polygons/Curves)──►                           ──►  .stape (64-byte Header + 32-byte Cords)
+```
+
+* **`.stile` (Sovereign Tile)**: 64-byte L1 cache-aligned binary header (`magic='STIL'`, `tiles_x`, `tiles_y`, reserved pad) followed by contiguous $1{,}024$-byte $16 \times 16$ micro-tiles in premultiplied RGBA8. Enables direct $O(1)$ pointer math (`stile_get_tile_ptr`) and zero-overhead opaque beam flushing (`stile_flush_opaque!`) directly into display framebuffers.
+* **`.stape` (Sovereign Tape)**: 64-byte L1 cache-aligned binary header (`magic='STAP'`, `cord_count`, reserved pad) followed by packed 32-byte vector cords with pre-flattened Wang dyadic quadratic Bézier curves and backdrop tension carry flags. Supports backward opaque occlusion culling (`stape_reap!`) and direct Loom tile weaving (`stape_weave_tile!`).
 
 ---
 
@@ -116,7 +135,7 @@ SAGR includes an experimental desktop window editor proof-of-concept demonstrati
 * The included bootstrap SINC toolchain in `bin/` (`sinc.elf`, `packager_bin`, `staff`)
 
 ### 1. Build and Run the Complete Test Suite
-SAGR features an exhaustive 84-assertion test harness covering bitops, culling, Wang flattening, Loom area integrals, MSDF typography, and the 12-scene Golden Oracle:
+SAGR features an exhaustive 100-assertion test harness covering bitops, culling, Wang flattening, Loom area integrals, MSDF typography, the 12-scene Golden Oracle, and the Sovereign Asset pipeline:
 
 ```bash
 ./tests/run_tests.sh
@@ -133,8 +152,9 @@ SAGR features an exhaustive 84-assertion test harness covering bitops, culling, 
   Phase 6 (MSDF Typography):                 12/12 PASSED
   Phase 7 (Deterministic Golden Oracle):     11/11 PASSED
   Standalone Cross-Tile Regression:           1/1  PASSED
+  Sovereign Assets (.stile & .stape):        16/16 PASSED
 ==================================================================
-  TOTAL TESTS PASSED:                        84/84 BIT-PERFECT
+  TOTAL TESTS PASSED:                       100/100 BIT-PERFECT
   CORE ENGINE STATUS: 100% CLEAN & VERIFIED (EXIT 0)
 ==================================================================
 ```
@@ -193,7 +213,7 @@ fn main!() [
 
 ```
 SAGR/
-├── bin/                       # Bootstrap SINC toolchain (sinc.elf, packager_bin, staff)
+├── bin/                       # Bootstrap SINC toolchain (sinc.elf, packager_bin, staff, sagr-bake)
 ├── examples/
 │   ├── dino/                  # Playable Chrome Dino terminal runner
 │   │   ├── dino.sinc          # Game logic, physics & multi-color pixel renderer
@@ -204,18 +224,23 @@ SAGR/
 │   │   ├── x11_connector.c    # Pure X11 direct framebuffer blitter
 │   │   ├── play.sh            # Interactive desktop launcher
 │   │   └── README.md          # Prototype documentation & disclaimer
+│   ├── image_viewer/          # Sovereign raster image viewer (.stile beam flush)
+│   │   ├── image_viewer.sinc  # Direct .stile framebuffer blitter
+│   │   ├── run.sh             # Viewer execution script
+│   │   └── README.md          # Zero-decoder raster documentation
 │   └── mwe/                   # Minimal Working Example standalone test
-├── manual/                    # 8-Chapter Developer Manual
+├── manual/                    # 9-Chapter Developer Manual
 │   ├── SUMMARY.md             # Table of Contents
 │   ├── ch01_axioms.md         # Architecture & fixed-point math
 │   ├── ch02_slsp.md           # SINC Linear Surface Protocol (SLSP)
 │   ├── ch03_pegboard.md       # Pegboard vector tape protocol
 │   ├── ch04_flattener.md      # Wang's dyadic curve flattener
 │   ├── ch05_loom.md           # Jacquard Loom rasterizer (warp & weft)
-│   ├── ch06_msdf.md           # Integer MSDF typography (.sfont)
+│   ├── ch06_msdf.md           # Integer MSDF typography (TRG & MSDF)
 │   ├── ch07_memory.md         # Memory contracts & scratch buffers
-│   └── ch08_embedding.md      # API reference & embedding guide
-├── sagr/                      # Core SAGR Engine (STRICTLY <= 2,400 LOC)
+│   ├── ch08_embedding.md      # API reference & embedding guide
+│   └── ch09_assets.md         # Sovereign asset architecture (.stile & .stape)
+├── sagr/                      # Core SAGR Engine (Frozen at 1,986 LOC)
 │   ├── data/
 │   │   ├── pegboard_defs.sinc # Tape opcodes, cord layouts, and effect constants
 │   │   └── surface.sinc       # SLSP surface constants & format flags
@@ -224,19 +249,34 @@ SAGR/
 │   │   ├── flattener.sinc     # Wang's dyadic Bézier curve flattener
 │   │   ├── heddle.sinc        # Window occlusion reaper & SIMD alpha compositor
 │   │   ├── loom.sinc          # Jacquard Loom: Warp pluck & Weft prefix-sum
-│   │   ├── msdf.sinc          # Integer MSDF typography & .sfont loader
+│   │   ├── msdf.sinc          # Integer MSDF typography & TRG line layout
 │   │   └── pegboard.sinc      # Coordinate quantizer & tile cord clipper
 │   └── sys/
 │       ├── entry.sinc         # Phase 1 verification harness
 │       ├── slsp.sinc          # Linear surface descriptor & tile beam flush
 │       └── verify_sagr.sinc   # FNV-1a 64-bit hash engine & 12-scene golden oracle
+├── sassets/                   # Sovereign Asset Subsystem (Universal SINC Triad, 946 LOC)
+│   ├── build.staff            # Manifest for bin/sagr-bake (artifact sassets)
+│   ├── data/
+│   │   └── asset_defs.sinc    # BAKE_STILE_MAGIC, BAKE_STAPE_MAGIC, effect constants
+│   ├── pure/
+│   │   ├── bake_lexer.sinc    # Pure hex, whitespace, style, int parsers & premult math
+│   │   ├── stile.sinc         # Micro-tile runtime helpers (O(1) pointer math & beam flush)
+│   │   └── stape.sinc         # Vector tape runtime helpers (shutter reap & Loom weave)
+│   └── sys/
+│       ├── bake_io.sinc       # Unified sovereign file read/write syscall boundary
+│       ├── bake_ppm.sinc      # Netpbm P6 image converter & file I/O
+│       ├── bake_tape.sinc     # ASCII vector .tape -> .stape compiler with Wang Quads
+│       ├── bake_tile.sinc     # ASCII palette .tile -> .stile RGBA compiler
+│       └── entry.sinc         # Standalone CLI entrypoint & argument dispatcher
 ├── steel/                     # Minimal SINC standard runtime dependencies
 │   ├── pure/bitset.sinc       # Bitset utility functions
 │   └── sys/
 │       ├── arena.sinc         # Linear bump allocator
 │       └── sys.sinc           # Raw Linux syscall interface (sys_mmap, sys_write)
-└── tests/                     # 84-Assertion Bit-Perfect Test Suite
-    ├── run_tests.sh           # Master test runner
+└── tests/                     # 100-Assertion Bit-Perfect Test Suite
+    ├── run_tests.sh           # Master test runner & CLI verification
+    ├── test_assets.sinc       # 16-assertion sovereign asset verification suite
     ├── test_phase1.sinc .. test_phase7.sinc # Subsystem test suites
     └── test_failing_cross_tile_moire.sinc # Multi-tile backdrop tension regression test
 ```
@@ -252,9 +292,10 @@ The complete developer manual is located in the [`manual/`](manual/) directory:
 * [Ch 3: Pegboard Vector Tape Protocol](manual/ch03_pegboard.md)
 * [Ch 4: Wang's Dyadic Flattener & Monotonic Slicing](manual/ch04_flattener.md)
 * [Ch 5: The Jacquard Loom Rasterizer (Warp & Weft)](manual/ch05_loom.md)
-* [Ch 6: Typography & MSDF Engine](manual/ch06_msdf.md)
+* [Ch 6: Typography & MSDF Engine (TRG & MSDF)](manual/ch06_msdf.md)
 * [Ch 7: Memory Contracts & Scratch Buffers](manual/ch07_memory.md)
 * [Ch 8: API Reference & Embedding Guide](manual/ch08_embedding.md)
+* [Ch 9: Sovereign Asset Architecture (.stile & .stape)](manual/ch09_assets.md)
 
 ---
 

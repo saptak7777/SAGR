@@ -1,0 +1,115 @@
+// ==========================================
+// sassets/sys/bake_ppm.sinc
+// Pure SINC Netpbm P6/PAM Baker (.ppm -> .stile)
+// Zero Python, Zero Libc, Zero idiv Instructions
+// ==========================================
+
+fn bake_sample_ppm_px(in_buf, pixel_data_start, width, height, px, py) [
+    in_x = px < width;
+    if (in_x == 0) [
+        ret 0;
+    ]
+    in_y = py < height;
+    if (in_y == 0) [
+        ret 0;
+    ]
+    row_off = py * width;
+    px_idx = row_off + px;
+    px_bytes = px_idx * 3;
+    src_byte = pixel_data_start + px_bytes;
+    r = in_buf@[src_byte * 1];
+    g_off = src_byte + 1;
+    g = in_buf@[g_off * 1];
+    b_off = src_byte + 2;
+    b = in_buf@[b_off * 1];
+    a = 255;
+    sh_g = g << 8;
+    sh_b = b << 16;
+    sh_a = a << 24;
+    rg = r | sh_g;
+    ba = sh_b | sh_a;
+    px_val = rg | ba;
+    ret px_val;
+]
+
+fn bake_ppm_to_stile!(in_path, out_path, arena) [
+    off_scratch = arena_alloc_words!(arena, 2);
+    bytes_read = bake_read_file!(in_path, 16777216, off_scratch~, arena);
+    if (bytes_read < 0) [
+        ret 1;
+    ]
+    if (bytes_read < 10) [
+        ret 2;
+    ]
+    in_buf = off_scratch@[0];
+
+    // Verify P6 header
+    b0 = in_buf@[0 * 1];
+    b1 = in_buf@[1 * 1];
+    is_p = b0 == 80;
+    is_6 = b1 == 54;
+    is_p6 = is_p & is_6;
+    if (is_p6 == 0) [
+        ret 3;
+    ]
+
+    off_scratch@[0] = 2;
+
+    width = bake_parse_int!(in_buf, off_scratch, bytes_read);
+    height = bake_parse_int!(in_buf, off_scratch, bytes_read);
+    maxval = bake_parse_int!(in_buf, off_scratch, bytes_read);
+
+    // Consume trailing single whitespace char after maxval
+    off = off_scratch@[0];
+    if (off < bytes_read) [
+        off = off + 1;
+    ]
+    pixel_data_start = off;
+
+    // Branchless ceiling: (width + 15) >> 4
+    w_pad = width + 15;
+    tiles_x = w_pad >> 4;
+    h_pad = height + 15;
+    tiles_y = h_pad >> 4;
+
+    total_tiles = tiles_x * tiles_y;
+    payload_words = total_tiles * 128;
+    payload_buf = arena_alloc_words!(arena, payload_words);
+
+    // Slice micro-tiles into 128-word blocks
+    loop (ty:4096 = 0 .. tiles_y) [
+        loop (tx:4096 = 0 .. tiles_x) [
+            t_row = ty * tiles_x;
+            tile_k = t_row + tx;
+            k_base = tile_k * 128;
+
+            first_cx = tx * 16;
+            first_cy = ty * 16;
+
+            // Pack 256 pixels (128 words) into payload_buf
+            loop (row:16 = 0 .. 16) [
+                py = first_cy + row;
+                row_off = row * 8;
+                row_base = k_base + row_off;
+                loop (c_pair:8 = 0 .. 8) [
+                    col0 = c_pair * 2;
+                    col1 = col0 + 1;
+                    px0 = first_cx + col0;
+                    px1 = first_cx + col1;
+                    p0 = bake_sample_ppm_px(in_buf, pixel_data_start, width, height, px0, py);
+                    p1 = bake_sample_ppm_px(in_buf, pixel_data_start, width, height, px1, py);
+                    sh_p1 = p1 << 32;
+                    lo_p0 = p0 & 4294967295;
+                    word_val = sh_p1 | lo_p0;
+                    w_idx = row_base + c_pair;
+                    payload_buf@[w_idx] = word_val;
+                ]
+            ]
+        ]
+    ]
+
+    sh_tx = tiles_x << 16;
+    w0_dims = sh_tx | tiles_y;
+    res = bake_write_sovereign_file!(out_path, BAKE_STILE_MAGIC, w0_dims, payload_buf, payload_words, arena);
+    ret res;
+]

@@ -1,0 +1,262 @@
+// ==========================================
+// sassets/pure/bake_lexer.sinc
+// SAGR Sovereign Asset Compiler Shared Lexer
+// Zero Libc, Zero Floating Point, Zero Division Premultiplication
+// ==========================================
+
+fn bake_premult_ch(c_val, a_val) [
+    prod = c_val * a_val;
+    x = prod + 128;
+    x_hi = x >> 8;
+    x_sum = x + x_hi;
+    c_premult = x_sum >> 8;
+    ret c_premult;
+]
+
+fn bake_hex_nibble(ch) [
+    is_d_lo = ch > 47;
+    is_d_hi = ch < 58;
+    is_digit = is_d_lo & is_d_hi;
+    if (is_digit == 1) [
+        diff = ch - 48;
+        ret diff;
+    ]
+    is_u_lo = ch > 64;
+    is_u_hi = ch < 71;
+    is_upper = is_u_lo & is_u_hi;
+    if (is_upper == 1) [
+        diff = ch - 65;
+        res = diff + 10;
+        ret res;
+    ]
+    is_l_lo = ch > 96;
+    is_l_hi = ch < 103;
+    is_lower = is_l_lo & is_l_hi;
+    if (is_lower == 1) [
+        diff = ch - 97;
+        res = diff + 10;
+        ret res;
+    ]
+    ret 0;
+]
+
+fn bake_skip_ws!(buf, off_ptr, max_bytes) [
+    off = off_ptr@[0];
+    ws_active = 1;
+    loop (ws:100 = 0 .. 100) [
+        if (ws_active == 1) [
+            in_b = off < max_bytes;
+            if (in_b == 0) [
+                ws_active = 0;
+            ]
+            if (ws_active == 1) [
+                b = buf@[off * 1];
+                is_sp = b == 32;
+                is_tb = b == 9;
+                is_w = is_sp | is_tb;
+                if (is_w == 1) [
+                    off = off + 1;
+                ]
+                if (is_w == 0) [
+                    ws_active = 0;
+                ]
+            ]
+        ]
+    ]
+    off_ptr@[0] = off;
+    ret off;
+]
+
+fn bake_parse_hex_u32!(buf, off_ptr, max_bytes) [
+    off = bake_skip_ws!(buf, off_ptr, max_bytes);
+    val = 0;
+
+    if (off < max_bytes) [
+        cb = buf@[off * 1];
+        if (cb == 35) [
+            off = off + 1;
+        ]
+    ]
+
+    hex_active = 1;
+    loop (step:8 = 0 .. 8) [
+        if (hex_active == 1) [
+            in_b = off < max_bytes;
+            if (in_b == 0) [
+                hex_active = 0;
+            ]
+            if (hex_active == 1) [
+                ch = buf@[off * 1];
+                nib = bake_hex_nibble(ch);
+                sh_val = val << 4;
+                val = sh_val | nib;
+                off = off + 1;
+            ]
+        ]
+    ]
+
+    off_ptr@[0] = off;
+
+    sh_r = val >> 24;
+    r = sh_r & 255;
+    sh_g = val >> 16;
+    g = sh_g & 255;
+    sh_b = val >> 8;
+    b = sh_b & 255;
+    a = val & 255;
+
+    r_p = bake_premult_ch(r, a);
+    g_p = bake_premult_ch(g, a);
+    b_p = bake_premult_ch(b, a);
+
+    sh_gp = g_p << 8;
+    sh_bp = b_p << 16;
+    sh_ap = a << 24;
+    rg = r_p | sh_gp;
+    ba = sh_bp | sh_ap;
+    res = rg | ba;
+    ret res;
+]
+
+fn bake_parse_int!(buf, off_ptr, max_bytes) [
+    off = off_ptr@[0];
+    val = 0;
+
+    ws_active = 1;
+    loop (ws:100 = 0 .. 100) [
+        if (ws_active == 1) [
+            in_b = off < max_bytes;
+            if (in_b == 0) [
+                ws_active = 0;
+            ]
+            if (ws_active == 1) [
+                b = buf@[off * 1];
+                is_sp = b == 32;
+                is_tb = b == 9;
+                is_cr = b == 13;
+                is_lf = b == 10;
+                is_cm = b == 44;
+                m1 = is_sp | is_tb;
+                m2 = is_cr | is_lf;
+                m3 = m1 | m2;
+                m_ws = m3 | is_cm;
+                if (m_ws == 1) [
+                    off = off + 1;
+                ]
+                if (m_ws == 0) [
+                    ws_active = 0;
+                ]
+            ]
+        ]
+    ]
+
+    dig_active = 1;
+    loop (dig:16 = 0 .. 16) [
+        if (dig_active == 1) [
+            in_b = off < max_bytes;
+            if (in_b == 0) [
+                dig_active = 0;
+            ]
+            if (dig_active == 1) [
+                b = buf@[off * 1];
+                is_ge = b > 47;
+                is_le = b < 58;
+                is_d = is_ge & is_le;
+                if (is_d == 1) [
+                    d = b - 48;
+                    prod = val * 10;
+                    val = prod + d;
+                    off = off + 1;
+                ]
+                if (is_d == 0) [
+                    dig_active = 0;
+                ]
+            ]
+        ]
+    ]
+
+    off_ptr@[0] = off;
+    ret val;
+]
+
+fn bake_skip_to_nl!(in_buf, off_ptr, max_bytes) [
+    off = off_ptr@[0];
+    active = 1;
+    loop (step:1000 = 0 .. 1000) [
+        if (active == 1) [
+            in_b = off < max_bytes;
+            if (in_b == 0) [
+                active = 0;
+            ]
+            if (active == 1) [
+                b = in_buf@[off * 1];
+                off = off + 1;
+                if (b == 10) [
+                    active = 0;
+                ]
+            ]
+        ]
+    ]
+    off_ptr@[0] = off;
+    ret 0;
+]
+
+fn bake_parse_style!(in_buf, off_ptr, max_bytes) [
+    off = off_ptr@[0];
+    active = 1;
+    loop (step:100 = 0 .. 100) [
+        if (active == 1) [
+            in_b = off < max_bytes;
+            if (in_b == 0) [
+                active = 0;
+            ]
+            if (active == 1) [
+                b = in_buf@[off * 1];
+                if (b == 35) [
+                    active = 0;
+                ]
+                if (b == 10) [
+                    active = 0;
+                ]
+                if (active == 1) [
+                    off = off + 1;
+                ]
+            ]
+        ]
+    ]
+    off_ptr@[0] = off;
+    rgba = bake_parse_hex_u32!(in_buf, off_ptr, max_bytes);
+
+    off2 = off_ptr@[0];
+    effect = BAKE_EFFECT_PURE;
+    act2 = 1;
+    loop (step2:100 = 0 .. 100) [
+        if (act2 == 1) [
+            in_b = off2 < max_bytes;
+            if (in_b == 0) [
+                act2 = 0;
+            ]
+            if (act2 == 1) [
+                eb = in_buf@[off2 * 1];
+                if (eb == 115) [
+                    effect = BAKE_EFFECT_SHUTTER;
+                    act2 = 0;
+                ]
+                if (eb == 10) [
+                    act2 = 0;
+                ]
+                if (act2 == 1) [
+                    off2 = off2 + 1;
+                ]
+            ]
+        ]
+    ]
+    off_ptr@[0] = off2;
+
+    sh_op = 1 << 56;
+    sh_eff = effect << 48;
+    lo_rgba = rgba & 4294967295;
+    m_op = sh_op | sh_eff;
+    style_w0 = m_op | lo_rgba;
+    ret style_w0;
+]

@@ -1,0 +1,327 @@
+// ==========================================
+// examples/image_viewer/image_viewer.sinc
+// SAGR Sovereign Raster Asset Viewer
+// Renders any .stile micro-tile stream via native SAGR compositor
+// 0 Engine Decoders, 0 Heap Fragmentation, Bit-Exact Silicon Execution
+// ==========================================
+
+const BG_COL_DARK  = 4280555544; // #181824FF
+const BG_COL_LIGHT = 4281344546; // #222230FF
+const STILE_MAGIC  = 1398032716; // 0x5354494C 'STIL'
+
+fn init_default_stile_path!(path_buf) [
+    // "scratch/F.stile\0"
+    i = 0;
+    path_buf@[i * 1] = 115;
+    i = i + 1;
+    path_buf@[i * 1] = 99;
+    i = i + 1;
+    path_buf@[i * 1] = 114;
+    i = i + 1;
+    path_buf@[i * 1] = 97;
+    i = i + 1;
+    path_buf@[i * 1] = 116;
+    i = i + 1;
+    path_buf@[i * 1] = 99;
+    i = i + 1;
+    path_buf@[i * 1] = 104;
+    i = i + 1;
+    path_buf@[i * 1] = 47;
+    i = i + 1;
+    path_buf@[i * 1] = 70;
+    i = i + 1;
+    path_buf@[i * 1] = 46;
+    i = i + 1;
+    path_buf@[i * 1] = 115;
+    i = i + 1;
+    path_buf@[i * 1] = 116;
+    i = i + 1;
+    path_buf@[i * 1] = 105;
+    i = i + 1;
+    path_buf@[i * 1] = 108;
+    i = i + 1;
+    path_buf@[i * 1] = 101;
+    i = i + 1;
+    path_buf@[i * 1] = 0;
+    ret 0;
+]
+
+fn init_out_ppm_path!(path_buf) [
+    // "scratch/image_view.ppm\0"
+    i = 0;
+    path_buf@[i * 1] = 115;
+    i = i + 1;
+    path_buf@[i * 1] = 99;
+    i = i + 1;
+    path_buf@[i * 1] = 114;
+    i = i + 1;
+    path_buf@[i * 1] = 97;
+    i = i + 1;
+    path_buf@[i * 1] = 116;
+    i = i + 1;
+    path_buf@[i * 1] = 99;
+    i = i + 1;
+    path_buf@[i * 1] = 104;
+    i = i + 1;
+    path_buf@[i * 1] = 47;
+    i = i + 1;
+    path_buf@[i * 1] = 105;
+    i = i + 1;
+    path_buf@[i * 1] = 109;
+    i = i + 1;
+    path_buf@[i * 1] = 97;
+    i = i + 1;
+    path_buf@[i * 1] = 103;
+    i = i + 1;
+    path_buf@[i * 1] = 101;
+    i = i + 1;
+    path_buf@[i * 1] = 95;
+    i = i + 1;
+    path_buf@[i * 1] = 118;
+    i = i + 1;
+    path_buf@[i * 1] = 105;
+    i = i + 1;
+    path_buf@[i * 1] = 101;
+    i = i + 1;
+    path_buf@[i * 1] = 119;
+    i = i + 1;
+    path_buf@[i * 1] = 46;
+    i = i + 1;
+    path_buf@[i * 1] = 112;
+    i = i + 1;
+    path_buf@[i * 1] = 112;
+    i = i + 1;
+    path_buf@[i * 1] = 109;
+    i = i + 1;
+    path_buf@[i * 1] = 0;
+    ret 0;
+]
+
+fn write_num_to_buf!(buf, off_ptr, num) [
+    // Write decimal integer (up to 4 digits) to buffer
+    off = off_ptr@[0];
+    if (num < 10) [
+        buf@[off * 1] = 48 + num;
+        off = off + 1;
+        off_ptr@[0] = off;
+        ret 0;
+    ]
+    if (num < 100) [
+        d1 = num / 10;
+        prod1 = d1 * 10;
+        d0 = num - prod1;
+        buf@[off * 1] = 48 + d1;
+        off = off + 1;
+        buf@[off * 1] = 48 + d0;
+        off = off + 1;
+        off_ptr@[0] = off;
+        ret 0;
+    ]
+    if (num < 1000) [
+        d2 = num / 100;
+        prod2 = d2 * 100;
+        rem2 = num - prod2;
+        d1 = rem2 / 10;
+        prod1 = d1 * 10;
+        d0 = rem2 - prod1;
+        buf@[off * 1] = 48 + d2;
+        off = off + 1;
+        buf@[off * 1] = 48 + d1;
+        off = off + 1;
+        buf@[off * 1] = 48 + d0;
+        off = off + 1;
+        off_ptr@[0] = off;
+        ret 0;
+    ]
+    d3 = num / 1000;
+    prod3 = d3 * 1000;
+    rem3 = num - prod3;
+    d2 = rem3 / 100;
+    prod2 = d2 * 100;
+    rem2 = rem3 - prod2;
+    d1 = rem2 / 10;
+    prod1 = d1 * 10;
+    d0 = rem2 - prod1;
+    buf@[off * 1] = 48 + d3;
+    off = off + 1;
+    buf@[off * 1] = 48 + d2;
+    off = off + 1;
+    buf@[off * 1] = 48 + d1;
+    off = off + 1;
+    buf@[off * 1] = 48 + d0;
+    off = off + 1;
+    off_ptr@[0] = off;
+    ret 0;
+]
+
+fn dump_ppm_file!(path_buf, fb_base, width, height, stride, row_scratch) [
+    fd = sys_open_create!(path_buf);
+    if (fd < 0) [
+        ret 1;
+    ]
+
+    off_ptr = row_scratch + 2048;
+    off_ptr@[0] = 0;
+
+    hdr_buf = row_scratch + 1024;
+    hdr_buf@[0 * 1] = 80;
+    hdr_buf@[1 * 1] = 54;
+    hdr_buf@[2 * 1] = 10;
+    off_ptr@[0] = 3;
+
+    write_num_to_buf!(hdr_buf, off_ptr, width);
+    cur_off = off_ptr@[0];
+    hdr_buf@[cur_off * 1] = 32;
+    cur_off = cur_off + 1;
+    off_ptr@[0] = cur_off;
+
+    write_num_to_buf!(hdr_buf, off_ptr, height);
+    cur_off2 = off_ptr@[0];
+    hdr_buf@[cur_off2 * 1] = 10;
+    cur_off2 = cur_off2 + 1;
+    hdr_buf@[cur_off2 * 1] = 50;
+    cur_off2 = cur_off2 + 1;
+    hdr_buf@[cur_off2 * 1] = 53;
+    cur_off2 = cur_off2 + 1;
+    hdr_buf@[cur_off2 * 1] = 53;
+    cur_off2 = cur_off2 + 1;
+    hdr_buf@[cur_off2 * 1] = 10;
+    cur_off2 = cur_off2 + 1;
+
+    sys_write!(fd, hdr_buf, cur_off2);
+
+    row_bytes = width * 3;
+    loop (y:4096 = 0 .. height) [
+        fb_row = fb_base + (y * stride);
+        loop (x:4096 = 0 .. width) [
+            px_ptr = fb_row + (x * 4);
+            r = px_ptr@[0 * 1];
+            g = px_ptr@[1 * 1];
+            b = px_ptr@[2 * 1];
+            out_ptr = row_scratch + (x * 3);
+            out_ptr@[0 * 1] = r;
+            out_ptr@[1 * 1] = g;
+            out_ptr@[2 * 1] = b;
+        ]
+        sys_write!(fd, row_scratch, row_bytes);
+    ]
+
+    sys_close!(fd);
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(268435456);
+    arena = arena_init!(536870912, 268435456);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+
+    args = get_argv!();
+    path_arg = args@[1];
+
+    path_buf_in = arena_alloc_words!(arena, 32);
+    path_in = path_arg;
+    if (path_arg == 0) [
+        init_default_stile_path!(path_buf_in);
+        path_in = path_buf_in;
+    ]
+
+    path_buf_out = arena_alloc_words!(arena, 32);
+    init_out_ppm_path!(path_buf_out);
+
+    // Open .stile file
+    fd = sys_open_read!(path_in);
+    if (fd < 0) [
+        sys_exit!(2);
+    ]
+
+    // Read 64-byte Header
+    hdr_buf = arena_alloc_words!(arena, 8);
+    h_bytes = sys_read!(fd, hdr_buf, 64);
+    if (h_bytes < 64) [
+        sys_close!(fd);
+        sys_exit!(3);
+    ]
+
+    // Verify .stile Magic ('STIL')
+    w0_val = hdr_buf@[0];
+    mag_read = w0_val >> 32;
+    if (mag_read != STILE_MAGIC) [
+        sys_close!(fd);
+        sys_exit!(10);
+    ]
+
+    // Extract Dimensions
+    dims = stile_get_dims(hdr_buf);
+    tiles_x = dims >> 16;
+    tiles_y = dims & 65535;
+
+    if ((tiles_x < 1) | (tiles_y < 1)) [
+        sys_close!(fd);
+        sys_exit!(4);
+    ]
+
+    total_tiles = tiles_x * tiles_y;
+    payload_words = total_tiles * 128;
+    payload_bytes = payload_words * 8;
+
+    // Allocate continuous buffer for header + payload
+    full_words = 8 + payload_words;
+    stile_ptr = arena_alloc_words!(arena, full_words);
+
+    // Copy header
+    loop (hw:8 = 0 .. 8) [
+        stile_ptr@[hw] = hdr_buf@[hw];
+    ]
+
+    // Read payload directly after header
+    payload_dest = stile_ptr + 64;
+    p_bytes = sys_read!(fd, payload_dest, payload_bytes);
+    sys_close!(fd);
+
+    if (p_bytes < payload_bytes) [
+        sys_exit!(5);
+    ]
+
+    // Canvas Dimensions
+    canvas_w = tiles_x * 16;
+    canvas_h = tiles_y * 16;
+    stride = canvas_w * 4;
+
+    surface = slsp_create!(arena, canvas_w, canvas_h, 0);
+    fb_ptr = surface.SLSP_WORD_FB_PTR;
+
+    tile_scratch = arena_alloc_words!(arena, 128);
+    row_scratch = arena_alloc_words!(arena, 2048);
+
+    // Render micro-tiles
+    loop (ty:256 = 0 .. tiles_y) [
+        loop (tx:256 = 0 .. tiles_x) [
+            tile_k = ty * tiles_x;
+            tile_k = tile_k + tx;
+
+            // Checkered background pattern
+            sum_t = tx + ty;
+            chk = sum_t & 1;
+            bg_col = BG_COL_DARK;
+            if (chk == 1) [
+                bg_col = BG_COL_LIGHT;
+            ]
+
+            // 1. Fill tile with checkered background
+            hd_broadcast_solid!(tile_scratch, bg_col);
+
+            // 2. Composite .stile micro-tile over background
+            stile_composite_tile!(tile_scratch, stile_ptr, tile_k);
+
+            // 3. Beam flush directly to framebuffer
+            slsp_beam_flush_tile!(fb_ptr, tx, ty, stride, tile_scratch~);
+        ]
+    ]
+
+    // Dump rendered canvas to PPM
+    dump_ppm_file!(path_buf_out, fb_ptr, canvas_w, canvas_h, stride, row_scratch);
+
+    sys_exit!(0);
+]

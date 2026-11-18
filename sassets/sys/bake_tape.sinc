@@ -1,0 +1,219 @@
+// ==========================================
+// sassets/sys/bake_tape.sinc
+// Pure SINC Vector Tape Compiler (.tape -> .stape)
+// Supports rect, line, and quad (Wang's Quadratic Béziers)
+// Reuses flattener.sinc & bitops.sinc via Zero-Overlap Bundling
+// ==========================================
+
+fn bake_emit_cord!(cords_buf, cord_idx_ptr, x0_q8, y0_q8, x1_q8, y1_q8, span_x0_q8, span_x1_q8, style_w0) [
+    if (y0_q8 == y1_q8) [
+        ret 0;
+    ]
+
+    tx0 = span_x0_q8 >> 12;
+    tx1 = span_x1_q8 >> 12;
+    dx = tx0 - tx1;
+    mx = dx >> 63;
+    del_x = dx & mx;
+    tx_lo = tx1 + del_x;
+    tx_hi = tx0 - del_x;
+
+    ty0 = y0_q8 >> 12;
+    ty1 = y1_q8 >> 12;
+    dy = ty0 - ty1;
+    my = dy >> 63;
+    del_y = dy & my;
+    ty_lo = ty1 + del_y;
+    ty_hi = ty0 - del_y;
+
+    if (tx_lo < 0) [
+        tx_lo = 0;
+    ]
+    if (tx_hi > 119) [
+        tx_hi = 119;
+    ]
+    if (ty_lo < 0) [
+        ty_lo = 0;
+    ]
+
+    row_mask = fl_make_row_mask(ty_lo, ty_hi);
+
+    tx_lo_c = tx_lo & 255;
+    sh_txlo = tx_lo_c << 40;
+    tx_hi_c = tx_hi & 255;
+    sh_txhi = tx_hi_c << 32;
+    m_tx = sh_txlo | sh_txhi;
+    w0 = style_w0 | m_tx;
+
+    sh_sx0 = x0_q8 << 32;
+    lo_sy0 = y0_q8 & 4294967295;
+    w1 = sh_sx0 | lo_sy0;
+
+    sh_sx1 = x1_q8 << 32;
+    lo_sy1 = y1_q8 & 4294967295;
+    w2 = sh_sx1 | lo_sy1;
+
+    w3 = row_mask;
+
+    c_idx = cord_idx_ptr@[0];
+    q_base = c_idx * 4;
+    idx0 = q_base + 0;
+    cords_buf@[idx0] = w0;
+    idx1 = q_base + 1;
+    cords_buf@[idx1] = w1;
+    idx2 = q_base + 2;
+    cords_buf@[idx2] = w2;
+    idx3 = q_base + 3;
+    cords_buf@[idx3] = w3;
+    nxt_c = c_idx + 1;
+    cord_idx_ptr@[0] = nxt_c;
+    ret 0;
+]
+
+fn bake_tape_to_stape!(in_path, out_path, arena) [
+    off_scratch = arena_alloc_words!(arena, 2);
+    bytes_read = bake_read_file!(in_path, 1048576, off_scratch~, arena);
+    if (bytes_read < 0) [
+        ret 1;
+    ]
+    if (bytes_read < 1) [
+        ret 2;
+    ]
+    in_buf = off_scratch@[0];
+    off_scratch@[0] = 0;
+
+    cords_buf = arena_alloc_words!(arena, 16384);
+    cord_idx_scratch = arena_alloc_words!(arena, 2);
+    cord_idx_scratch@[0] = 0;
+
+    parse_active = 1;
+    loop (line_idx:2048 = 0 .. 2048) [
+        if (parse_active == 1) [
+            off = off_scratch@[0];
+            in_b = off < bytes_read;
+            if (in_b == 0) [
+                parse_active = 0;
+            ]
+            if (parse_active == 1) [
+                ch = in_buf@[off * 1];
+
+                // rect: x y w h #RGBA [shutter] (ch == 114 'r')
+                if (ch == 114) [
+                    off5 = off + 5;
+                    off_scratch@[0] = off5;
+                    rx = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    ry = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    rw = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    rh = bake_parse_int!(in_buf, off_scratch, bytes_read);
+
+                    style_w0 = bake_parse_style!(in_buf, off_scratch, bytes_read);
+
+                    rx1 = rx + rw;
+                    ry1 = ry + rh;
+
+                    rx_q8 = rx << 8;
+                    ry_q8 = ry << 8;
+                    rx1_q8 = rx1 << 8;
+                    ry1_q8 = ry1 << 8;
+
+                    sh_shut = style_w0 >> 49;
+                    is_shutter = sh_shut & 1;
+                    span_l_x1 = rx_q8;
+                    span_r_x0 = rx1_q8;
+                    if (is_shutter == 1) [
+                        span_l_x1 = rx1_q8;
+                        span_r_x0 = rx_q8;
+                    ]
+                    bake_emit_cord!(cords_buf, cord_idx_scratch, rx_q8, ry_q8, rx_q8, ry1_q8, rx_q8, span_l_x1, style_w0);
+                    bake_emit_cord!(cords_buf, cord_idx_scratch, rx1_q8, ry1_q8, rx1_q8, ry_q8, span_r_x0, rx1_q8, style_w0);
+                ]
+
+                // line: x0 y0 x1 y1 #RGBA [shutter] (ch == 108 'l')
+                if (ch == 108) [
+                    off5 = off + 5;
+                    off_scratch@[0] = off5;
+                    lx0 = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    ly0 = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    lx1 = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    ly1 = bake_parse_int!(in_buf, off_scratch, bytes_read);
+
+                    style_w0 = bake_parse_style!(in_buf, off_scratch, bytes_read);
+
+                    lx0_q8 = lx0 << 8;
+                    ly0_q8 = ly0 << 8;
+                    lx1_q8 = lx1 << 8;
+                    ly1_q8 = ly1 << 8;
+
+                    bake_emit_cord!(cords_buf, cord_idx_scratch, lx0_q8, ly0_q8, lx1_q8, ly1_q8, lx0_q8, lx1_q8, style_w0);
+                ]
+
+                // quad: x0 y0 cx cy x1 y1 #RGBA [shutter] (ch == 113 'q')
+                if (ch == 113) [
+                    off5 = off + 5;
+                    off_scratch@[0] = off5;
+                    qx0 = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    qy0 = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    qcx = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    qcy = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    qx1 = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    qy1 = bake_parse_int!(in_buf, off_scratch, bytes_read);
+
+                    style_w0 = bake_parse_style!(in_buf, off_scratch, bytes_read);
+
+                    qx0_q8 = qx0 << 8;
+                    qy0_q8 = qy0 << 8;
+                    qcx_q8 = qcx << 8;
+                    qcy_q8 = qcy << 8;
+                    qx1_q8 = qx1 << 8;
+                    qy1_q8 = qy1 << 8;
+
+                    cx_two = qcx_q8 << 1;
+                    diff_x = qx0_q8 - cx_two;
+                    dd_x = diff_x + qx1_q8;
+
+                    cy_two = qcy_q8 << 1;
+                    diff_y = qy0_q8 - cy_two;
+                    dd_y = diff_y + qy1_q8;
+
+                    l_norm = fl_octagonal_norm(dd_x, dd_y);
+                    k = fl_compute_depth_k(l_norm);
+                    n_segs = 1 << k;
+
+                    dx_01 = qcx_q8 - qx0_q8;
+                    delta1_x = dx_01 << 1;
+                    delta2_x = dd_x;
+
+                    dy_01 = qcy_q8 - qy0_q8;
+                    delta1_y = dy_01 << 1;
+                    delta2_y = dd_y;
+
+                    cur_x_q8 = qx0_q8;
+                    cur_y_q8 = qy0_q8;
+
+                    step_limit = n_segs + 1;
+                    loop (qstep:128 = 1 .. step_limit) [
+                        nxt_x_q8 = fl_eval_pt(qx0_q8, delta1_x, delta2_x, qstep, k);
+                        nxt_y_q8 = fl_eval_pt(qy0_q8, delta1_y, delta2_y, qstep, k);
+
+                        bake_emit_cord!(cords_buf, cord_idx_scratch, cur_x_q8, cur_y_q8, nxt_x_q8, nxt_y_q8, cur_x_q8, nxt_x_q8, style_w0);
+
+                        cur_x_q8 = nxt_x_q8;
+                        cur_y_q8 = nxt_y_q8;
+                    ]
+                ]
+
+                bake_skip_to_nl!(in_buf, off_scratch, bytes_read);
+            ]
+        ]
+    ]
+
+    total_cords = cord_idx_scratch@[0];
+    if (total_cords < 1) [
+        ret 4;
+    ]
+
+    payload_words = total_cords * 4;
+    w0_dims = total_cords;
+    res = bake_write_sovereign_file!(out_path, BAKE_STAPE_MAGIC, w0_dims, cords_buf, payload_words, arena);
+    ret res;
+]

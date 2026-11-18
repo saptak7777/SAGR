@@ -1,0 +1,9 @@
+// ==========================================
+// sassets/data/asset_defs.sinc
+// Sovereign Asset Constants & Format Magic
+// ==========================================
+
+const BAKE_EFFECT_PURE = 1;
+const BAKE_EFFECT_SHUTTER = 2;
+const BAKE_STILE_MAGIC = 1398032716; // 0x5354494C 'STIL'
+const BAKE_STAPE_MAGIC = 1398030672; // 0x53544150 'STAP'
