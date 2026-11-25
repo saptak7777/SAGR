@@ -1,0 +1,113 @@
+// ==========================================
+// steel/sys/driver_sassets_linux.sinc
+// Standalone Linux CLI Driver for bin/sagr-bake
+// ==========================================
+
+fn baker_str_len(s) [
+    len = 0;
+    active = 1;
+    loop (l:4096 = 0 .. 4096) [
+        if (active == 1) [
+            b = s@[l * 1];
+            if (b == 0) [
+                active = 0;
+            ]
+            if (active == 1) [
+                len = len + 1;
+            ]
+        ]
+    ]
+    ret len;
+]
+
+fn baker_detect_kind(path, len) [
+    if (len < 5) [
+        ret 0;
+    ]
+    off4 = len - 4;
+    ext4 = 0;
+    loop (k:4 = 0 .. 4) [
+        idx = off4 + k;
+        b = path@[idx * 1];
+        sh = k << 3;
+        b_sh = b << sh;
+        ext4 = ext4 | b_sh;
+    ]
+    if (ext4 == 1836085294) [
+        ret BAKE_KIND_PPM;
+    ]
+    if (len < 6) [
+        ret 0;
+    ]
+    off5 = len - 5;
+    dot = path@[off5 * 1];
+    if (dot != 46) [
+        ret 0;
+    ]
+    if (ext4 == 1701603700) [
+        ret BAKE_KIND_TILE;
+    ]
+    if (ext4 == 1701863796) [
+        ret BAKE_KIND_TAPE;
+    ]
+    ret 0;
+]
+
+fn baker_print_usage!(arena) [
+    buf = arena_alloc_words!(arena, 5);
+    buf@[0] = 8295694720817001301;
+    buf@[1] = 7308041894635923297;
+    buf@[2] = 4500351053399145504;
+    buf@[3] = 8391737126163528736;
+    buf@[4] = 2622;
+    sys_write!(1, buf, 34);
+    ret 0;
+]
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+    args = get_argv!();
+    in_path = args@[1];
+    out_path = args@[2];
+    if (in_path == 0) [
+        baker_print_usage!(arena);
+        sys_exit!(1);
+    ]
+    if (out_path == 0) [
+        baker_print_usage!(arena);
+        sys_exit!(1);
+    ]
+    in_len = baker_str_len(in_path);
+    kind = baker_detect_kind(in_path, in_len);
+    if (kind == 0) [
+        sys_exit!(1);
+    ]
+    fd_in = sys_open_read!(in_path);
+    if (fd_in < 0) [
+        sys_exit!(1);
+    ]
+    in_buf = arena_alloc_words!(arena, 2097152);
+    bytes_read = sys_read!(fd_in, in_buf, 16777216);
+    sys_close!(fd_in);
+    if (bytes_read < 0) [
+        sys_exit!(1);
+    ]
+    out_buf = arena_alloc_words!(arena, 2097152);
+    res = bake_core!(in_buf, bytes_read, kind, out_buf, arena);
+    if (res < 11) [
+        sys_exit!(res);
+    ]
+    fd_out = sys_open_create!(out_path);
+    if (fd_out < 0) [
+        sys_exit!(4);
+    ]
+    sys_write!(fd_out, out_buf, res);
+    sys_close!(fd_out);
+    sys_exit!(0);
+]
+

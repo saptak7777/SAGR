@@ -17,7 +17,6 @@ echo "=================================================================="
 # 1. Merge sources into Battle-Test Bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \

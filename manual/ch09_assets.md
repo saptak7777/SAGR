@@ -39,11 +39,11 @@ Cache Line 0  │  Word 0 (Magic)  │       Words 1..7 (Zero-Pad)           │
 | **Byte 64+** | `0x40` | **Contiguous 1,024-byte (128-word) Micro-Tiles** | **Contiguous 32-byte (4-word [w0..w3]) Cord Quads** |
 
 ### The 56-Byte Zero-Pad L1 Alignment Guarantee
-In `sassets/sys/bake_io.sinc`, `bake_write_sovereign_file!` writes 64 header bytes:
+In `sassets/pure/stile.sinc`, `bake_emit_header!(out_buf, magic, w0_lo)` writes 64 header bytes directly at `out_buf`:
 ```sinc
-hdr_buf@[0] = w0_mag | lo_desc;
-loop (w:7 = 1 .. 8) [
-    hdr_buf@[w] = 0;
+out_buf@[0] = w0;
+loop (h:7 = 1 .. 8) [
+    out_buf@[h] = 0;
 ]
 ```
 Zeroing Words 1..7 guarantees that payload data at Byte 64 (`ptr + 64`) begins on an exact 64-byte L1 cache-line boundary, eliminating split-line cache fetch penalties during rasterization.
@@ -128,23 +128,22 @@ fn stape_reap!(stape_ptr, shutter_mask) [
 
 ## 5. The Ahead-of-Time Compiler (`bin/sagr-bake`)
 
-The sovereign asset compiler is implemented in 100% self-hosted pure SINC inside `sassets/` and built via `./bin/staff sassets/build.staff`:
+The sovereign asset compiler core lives in OS-neutral SINC inside `sassets/`, paired with the Linux CLI driver (`steel/sys/driver_sassets_linux.sinc`) via `./bin/staff sassets/build.staff`:
 
 ```
 sassets/
-├── build.staff            # Manifest for bin/sagr-bake (artifact sassets)
+├── build.staff            # Manifest for bin/sagr-bake (links driver_sassets_linux.sinc)
 ├── data/
-│   └── asset_defs.sinc    # BAKE_STILE_MAGIC, BAKE_STAPE_MAGIC, effect constants
+│   └── asset_defs.sinc    # BAKE_STILE_MAGIC, BAKE_KIND_*, effect constants (BAKE_STAPE_MAGIC in pegboard_defs.sinc)
 ├── pure/
 │   ├── bake_lexer.sinc    # Pure hex, int, and style parsers; premult math
-│   ├── stile.sinc         # Micro-tile runtime helpers (O(1) pointer math & beam flush)
+│   ├── stile.sinc         # Micro-tile helpers & shared 64-byte header emitter
 │   └── stape.sinc         # Vector tape runtime helpers (shutter reap & Loom weave)
 └── sys/
-    ├── bake_io.sinc       # Unified sovereign file read/write syscall boundary
-    ├── bake_ppm.sinc      # Netpbm P6 image converter & file I/O
-    ├── bake_tape.sinc     # ASCII vector .tape -> .stape compiler with Wang Quads
-    ├── bake_tile.sinc     # ASCII palette .tile -> .stile RGBA compiler
-    └── entry.sinc         # Standalone CLI entrypoint & argument dispatcher
+    ├── bake_ppm.sinc      # Netpbm P6 RAM -> .stile core (bake_ppm_core!)
+    ├── bake_tape.sinc     # ASCII .tape -> .stape core with Wang Quads (bake_tape_core!)
+    ├── bake_tile.sinc     # ASCII .tile -> .stile RGBA core (bake_tile_core!)
+    └── entry.sinc         # In-memory bake_core! SPINE dispatcher
 ```
 
 ### 5.1 CLI Usage Guide

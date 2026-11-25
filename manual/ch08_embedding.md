@@ -6,6 +6,14 @@ SAGR is straightforward to embed in operating system kernels, UEFI bootloaders, 
 
 ## 1. Core API Catalog
 
+### SPINE Core Entrypoints (`sagr/sys/entry.sinc`, `sassets/sys/entry.sinc`)
+
+* `sagr_core!(tape_buf, tape_bytes, surf_ptr, arena)`
+  OS-neutral vector compositor: validates `.stape` header, reaps shutters, weaves cord groups with backdrop carry, fast-fills solid interiors, and composites partial/translucent tiles onto `surf_ptr` (returns `0` on success, `1..5` on error).
+* `bake_core!(src_buf, src_len, kind, out_buf, arena)`
+  OS-neutral in-memory baker (`BAKE_KIND_PPM=1`, `BAKE_KIND_TILE=2`, `BAKE_KIND_TAPE=3`): compiles RAM buffers into `.stile` or `.stape` at `out_buf` and returns total byte length (`>= 64`, or `1..4` on error).
+* **Bare `.safe` C Host Contract:** Jump to `base + hdr[3] + hdr[2]` (32-byte `.safe` header), pass arguments in `rcx, rdx, rbx, rsi[, rdi]`, and preserve SysV callee-saved registers (`%rbx`, `%r12`–`%r15`) across the call.
+
 ### Surface & Framebuffer (`sagr/sys/slsp.sinc`)
 
 * `slsp_create!(arena, width, height, format)`
@@ -18,6 +26,8 @@ SAGR is straightforward to embed in operating system kernels, UEFI bootloaders, 
   Calculates all micro-tiles touched by a bounding box and sets their dirty bits.
 * `slsp_beam_flush_tile!(fb_base, tx, ty, stride, tile_words~)`
   Streams a 128-word ($16 \times 16$) TrueColor RGBA tile into the destination framebuffer.
+* `slsp_read_tile!(fb_base, tx, ty, stride, tile_words)`
+  Reads a $16 \times 16$ tile from `fb_base` into `tile_words` for read-modify-write blending.
 
 ---
 
@@ -34,7 +44,7 @@ SAGR is straightforward to embed in operating system kernels, UEFI bootloaders, 
 * `lm_weave_tile!(tape, tape_len, tx, ty, rule, warp_scratch, out_coverage)`
   Weaves all active cords for micro-tile $(T_x, T_y)$ into 256 sub-pixel coverage values.
 * `lm_weave_tile_backdrop!(tape, tape_len, tx, ty, rule, in_bd, out_bd, warp_scratch, out_coverage)`
-  Weaves micro-tile with horizontal backdrop tension propagation for multi-tile spanning shapes.
+  Weaves micro-tile with horizontal backdrop tension propagation and returns `(all_full << 32) | cov_or` (`all_full == 1` when every pixel has `256` coverage; `cov_or == 0` when empty).
 * `lm_weave_tile_row!(tape, tape_len, ty, nx, winding_rule, warp_scratch, tile_coverage, backdrop_buf)`
   Weaves an entire horizontal row of tiles with backdrop tension propagation.
 * `lm_shade_tile_rgba!(cov_scratch, fg_rgba, bg_rgba, tile_words)`
@@ -52,8 +62,6 @@ SAGR is straightforward to embed in operating system kernels, UEFI bootloaders, 
   Queries whether a rectangular region is 100% covered by opaque foreground windows.
 * `hd_reap_shutter!(tape, tape_len, mask_ptr)`
   Scans the cord tape backwards and mutates occluded draw calls into zero-cost NOPs.
-* `hd_is_solid_interior(active_cords, backdrop_buf)`
-  Checks if a tile has zero active cords and full 256 backdrop tension.
 * `hd_broadcast_solid!(tile_words, solid_rgba)`
   Fills a $16 \times 16$ tile with a solid color in $128$ word writes, bypassing Loom rasterization.
 * `hd_blend_pixel(src_px, dst_px)`

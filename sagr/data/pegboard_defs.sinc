@@ -3,20 +3,11 @@
 // Pegboard Ingestion, Segments & Canvas Bounds
 // ==========================================
 
-const PB_CMD_MOVE_TO = 1;
-const PB_CMD_LINE_TO = 2;
-const PB_CMD_QUAD_TO = 3;
-const PB_CMD_CLOSE   = 4;
-
-const PB_SEG_LINE    = 1;
-const PB_SEG_QUAD    = 2;
-
 const PB_CANVAS_W    = 491520;
 const PB_CANVAS_H    = 276480;
 
-const PB_ONE_Q16     = 65536;
-
-const PB_QUAD_WORDS  = 4;
+// Sovereign Vector Tape (.stape) Format Magic
+const BAKE_STAPE_MAGIC = 1398030672; // 0x53544150 'STAP'
 
 // TRG (Typed Relative Grid) Sovereign Ingestion Constants
 const TRG_PAYLOAD_OFFSET = 64;

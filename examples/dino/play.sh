@@ -14,7 +14,6 @@ mkdir -p scratch bin
 echo "[BUILD] Bundling and compiling SAGR Dino via sinc.elf..."
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/pure/bitops.sinc \
     sagr/pure/loom.sinc \

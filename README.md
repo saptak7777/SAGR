@@ -14,7 +14,7 @@ Designed around the **Jacquard Silicon Loom** architecture, SAGR evaluates sub-p
 SAGR relies on seven core technical constraints and architectural invariants:
 
 1. **Zero Float**: 100% fixed-point integer mathematics ($Q24.8$ world space, $Q8.8$ tile space, $U8$ color). Zero floating-point instructions (`addss`, `subss`, `mulss`, `divss`, `x87`, `sse-float`) in compiled output.
-2. **Zero Libc & Zero Traps**: Zero C runtime dependency, zero panic traps (`ud2`). Raw native Linux x86-64 syscalls (`sys_mmap`, `sys_write`, `sys_open`, `sys_close`, `sys_exit`) via `steel/sys/sys.sinc`.
+2. **Zero Libc & Zero Traps**: Zero C runtime dependency, zero panic traps (`ud2`). OS-neutral SPINE cores (`sagr_core!`, `bake_core!`) contain **0 syscalls**; standalone Linux binaries bind syscalls via `steel/sys/sys.sinc` and `steel/sys/driver_*_linux.sinc`.
 3. **Single-Instruction SSA Sequencing**: Pure SINC source code adheres strictly to 1 operation per statement. Zero nested arithmetic expressions, zero hidden allocations, and 100% deterministic register allocation.
 4. **L1 Data Cache Residency**: All rasterization operates strictly inside $16 \times 16$ pixel micro-tiles ($1{,}024$ bytes RGBA). Working scratch is $< 6\text{ KB}$, maintaining a $> 99.8\%$ L1 data cache hit rate.
 5. **Commutative Weaving**: No sorting edge intersections. SAGR plucks vertical cords into signed area fluxes and integrates them with a branchless 4-cycle prefix sum.
@@ -135,7 +135,7 @@ SAGR includes an experimental desktop window editor proof-of-concept demonstrati
 * The included bootstrap SINC toolchain in `bin/` (`sinc.elf`, `packager_bin`, `staff`)
 
 ### 1. Build and Run the Complete Test Suite
-SAGR features an exhaustive 100-assertion test harness covering bitops, culling, Wang flattening, Loom area integrals, MSDF typography, the 12-scene Golden Oracle, and the Sovereign Asset pipeline:
+SAGR features an exhaustive 101-assertion test harness covering bitops, culling, Wang flattening, Loom area integrals, MSDF typography, the 12-scene Golden Oracle, and the Sovereign Asset pipeline:
 
 ```bash
 ./tests/run_tests.sh
@@ -152,9 +152,9 @@ SAGR features an exhaustive 100-assertion test harness covering bitops, culling,
   Phase 6 (MSDF Typography):                 12/12 PASSED
   Phase 7 (Deterministic Golden Oracle):     11/11 PASSED
   Standalone Cross-Tile Regression:           1/1  PASSED
-  Sovereign Assets (.stile & .stape):        16/16 PASSED
+  Sovereign Assets (.stile & .stape):        17/17 PASSED
 ==================================================================
-  TOTAL TESTS PASSED:                       100/100 BIT-PERFECT
+  TOTAL TESTS PASSED:                       101/101 BIT-PERFECT
   CORE ENGINE STATUS: 100% CLEAN & VERIFIED (EXIT 0)
 ==================================================================
 ```
@@ -240,43 +240,43 @@ SAGR/
 │   ├── ch07_memory.md         # Memory contracts & scratch buffers
 │   ├── ch08_embedding.md      # API reference & embedding guide
 │   └── ch09_assets.md         # Sovereign asset architecture (.stile & .stape)
-├── sagr/                      # Core SAGR Engine (Frozen at 1,986 LOC)
+├── sagr/                      # Core SAGR Engine (1,951 LOC)
 │   ├── data/
-│   │   ├── pegboard_defs.sinc # Tape opcodes, cord layouts, and effect constants
+│   │   ├── pegboard_defs.sinc # Canvas bounds, .stape magic, and TRG constants
 │   │   └── surface.sinc       # SLSP surface constants & format flags
 │   ├── pure/
-│   │   ├── bitops.sinc        # 64-bit BMI1 bit manipulation (ctz, blsr, bitsets)
+│   │   ├── bitops.sinc        # 64-bit BMI1 bit manipulation (ctz, lzcnt, bo_abs)
 │   │   ├── flattener.sinc     # Wang's dyadic Bézier curve flattener
 │   │   ├── heddle.sinc        # Window occlusion reaper & SIMD alpha compositor
 │   │   ├── loom.sinc          # Jacquard Loom: Warp pluck & Weft prefix-sum
 │   │   ├── msdf.sinc          # Integer MSDF typography & TRG line layout
 │   │   └── pegboard.sinc      # Coordinate quantizer & tile cord clipper
 │   └── sys/
-│       ├── entry.sinc         # Phase 1 verification harness
-│       ├── slsp.sinc          # Linear surface descriptor & tile beam flush
+│       ├── entry.sinc         # Sovereign SPINE compositor core (sagr_core!)
+│       ├── slsp.sinc          # Linear surface descriptor, tile read & beam flush
 │       └── verify_sagr.sinc   # FNV-1a 64-bit hash engine & 12-scene golden oracle
-├── sassets/                   # Sovereign Asset Subsystem (Universal SINC Triad, 946 LOC)
+├── sassets/                   # Sovereign Asset Subsystem (OS-Neutral Core, 823 LOC)
 │   ├── build.staff            # Manifest for bin/sagr-bake (artifact sassets)
 │   ├── data/
-│   │   └── asset_defs.sinc    # BAKE_STILE_MAGIC, BAKE_STAPE_MAGIC, effect constants
+│   │   └── asset_defs.sinc    # BAKE_STILE_MAGIC, BAKE_KIND_* & effect constants
 │   ├── pure/
 │   │   ├── bake_lexer.sinc    # Pure hex, whitespace, style, int parsers & premult math
-│   │   ├── stile.sinc         # Micro-tile runtime helpers (O(1) pointer math & beam flush)
+│   │   ├── stile.sinc         # Micro-tile runtime helpers & shared 64B header emitter
 │   │   └── stape.sinc         # Vector tape runtime helpers (shutter reap & Loom weave)
 │   └── sys/
-│       ├── bake_io.sinc       # Unified sovereign file read/write syscall boundary
-│       ├── bake_ppm.sinc      # Netpbm P6 image converter & file I/O
-│       ├── bake_tape.sinc     # ASCII vector .tape -> .stape compiler with Wang Quads
-│       ├── bake_tile.sinc     # ASCII palette .tile -> .stile RGBA compiler
-│       └── entry.sinc         # Standalone CLI entrypoint & argument dispatcher
-├── steel/                     # Minimal SINC standard runtime dependencies
-│   ├── pure/bitset.sinc       # Bitset utility functions
+│       ├── bake_ppm.sinc      # Netpbm P6 image core (RAM -> .stile)
+│       ├── bake_tape.sinc     # ASCII vector .tape -> .stape core with Wang Quads
+│       ├── bake_tile.sinc     # ASCII palette .tile -> .stile RGBA core
+│       └── entry.sinc         # In-memory bake_core! SPINE dispatcher
+├── steel/                     # SINC Runtime & OS Platform Drivers (235 LOC)
 │   └── sys/
 │       ├── arena.sinc         # Linear bump allocator
+│       ├── driver_sagr_linux.sinc    # Standalone Linux harness for sagr/build.staff
+│       ├── driver_sassets_linux.sinc # Linux CLI driver for bin/sagr-bake
 │       └── sys.sinc           # Raw Linux syscall interface (sys_mmap, sys_write)
-└── tests/                     # 100-Assertion Bit-Perfect Test Suite
-    ├── run_tests.sh           # Master test runner & CLI verification
-    ├── test_assets.sinc       # 16-assertion sovereign asset verification suite
+└── tests/                     # 101-Assertion Bit-Perfect Test Suite
+    ├── run_tests.sh           # Master test runner, Stage A audits & CLI verification
+    ├── test_assets.sinc       # 17-assertion sovereign asset verification suite
     ├── test_phase1.sinc .. test_phase7.sinc # Subsystem test suites
     └── test_failing_cross_tile_moire.sinc # Multi-tile backdrop tension regression test
 ```

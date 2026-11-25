@@ -53,7 +53,6 @@ echo ""
 echo "[BUILD] Bundling and compiling SAGR Image Viewer via sinc.elf..."
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/pure/bitops.sinc \
     sagr/pure/heddle.sinc \

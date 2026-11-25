@@ -13,7 +13,6 @@ mkdir -p scratch bin
 echo "[BUILD] Compiling Phase 7 Golden Oracle Suite..."
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \

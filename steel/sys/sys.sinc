@@ -20,11 +20,6 @@ fn sys_mmap!(size) [
 ]
 
 // --- 2. File Input/Output ---
-fn sys_open!(path, flags) [
-    fd = open!(path, flags);
-    ret fd;
-]
-
 fn sys_open_create!(path) [
     fd = open!(path, 577);
     ret fd;
@@ -32,11 +27,6 @@ fn sys_open_create!(path) [
 
 fn sys_open_read!(path) [
     fd = open!(path, 0);
-    ret fd;
-]
-
-fn sys_open_write!(path) [
-    fd = open!(path, 577);
     ret fd;
 ]
 
@@ -52,10 +42,6 @@ fn sys_write!(fd, buf, size) [
 fn sys_close!(fd) [
     close!(fd);
     ret 0;
-]
-
-fn sys_getdents!(fd, dirp, count) [
-    ret getdents!(fd, dirp, count);
 ]
 
 fn sys_ioctl!(fd, request, argp) [

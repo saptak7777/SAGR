@@ -540,20 +540,14 @@ fn test_style_parser!(arena) [
     ret 0;
 ]
 
-// Test 14: Sovereign File Writer Unopenable Output Error Path (ret 4)
+// Test 14: Sovereign In-Memory Asset Compiler Invalid Kind Rejection (ret 1)
 fn test_unopenable_write_error!(arena) [
-    path_buf = arena_alloc_words!(arena, 4);
-    path_buf@[0 * 1] = 47;
-    path_buf@[1 * 1] = 110;
-    path_buf@[2 * 1] = 111;
-    path_buf@[3 * 1] = 47;
-    path_buf@[4 * 1] = 120;
-    path_buf@[5 * 1] = 0;
-
-    payload = arena_alloc_words!(arena, 16);
-    err = bake_write_sovereign_file!(path_buf, 1398032716, 0, payload, 16, arena);
-    if (err != 4) [ ret 1; ]
-
+    src = arena_alloc_words!(arena, 16);
+    out = arena_alloc_words!(arena, 16);
+    err = bake_core!(src, 0, 999, out, arena);
+    if (err != 1) [
+        ret 1;
+    ]
     ret 0;
 ]
 
@@ -702,6 +696,187 @@ fn test_end_to_end_vector_shutter!(arena) [
     ret 0;
 ]
 
+// Test 17: End-to-End bake_core! -> sagr_core! Multi-Tile Carry, Blend & Shutter
+fn test_end_to_end_bake_to_sagr_core!(arena) [
+    surf = slsp_create!(arena, SLSP_CANVAS_WIDTH, SLSP_CANVAS_HEIGHT, SLSP_FORMAT_RGBA8);
+    if (surf == 0) [
+        ret 1;
+    ]
+    fb = surf.SLSP_WORD_FB_PTR;
+    mask = surf.SLSP_WORD_MASK_PTR;
+    src_buf = arena_alloc_words!(arena, 16);
+    stape_out = arena_alloc_words!(arena, 512);
+
+    // 1. "rect: 16 16 48 32 #00FF00FF\n" (28 bytes)
+    src_buf@[0 * 1] = 114;
+    src_buf@[1 * 1] = 101;
+    src_buf@[2 * 1] = 99;
+    src_buf@[3 * 1] = 116;
+    src_buf@[4 * 1] = 58;
+    src_buf@[5 * 1] = 32;
+    src_buf@[6 * 1] = 49;
+    src_buf@[7 * 1] = 54;
+    src_buf@[8 * 1] = 32;
+    src_buf@[9 * 1] = 49;
+    src_buf@[10 * 1] = 54;
+    src_buf@[11 * 1] = 32;
+    src_buf@[12 * 1] = 52;
+    src_buf@[13 * 1] = 56;
+    src_buf@[14 * 1] = 32;
+    src_buf@[15 * 1] = 51;
+    src_buf@[16 * 1] = 50;
+    src_buf@[17 * 1] = 32;
+    src_buf@[18 * 1] = 35;
+    src_buf@[19 * 1] = 48;
+    src_buf@[20 * 1] = 48;
+    src_buf@[21 * 1] = 70;
+    src_buf@[22 * 1] = 70;
+    src_buf@[23 * 1] = 48;
+    src_buf@[24 * 1] = 48;
+    src_buf@[25 * 1] = 70;
+    src_buf@[26 * 1] = 70;
+    src_buf@[27 * 1] = 10;
+
+    len1 = bake_core!(src_buf, 28, BAKE_KIND_TAPE, stape_out, arena);
+    if (len1 < 64) [
+        ret 2;
+    ]
+    rc1 = sagr_core!(stape_out, len1, surf, arena);
+    if (rc1 != 0) [
+        ret 3;
+    ]
+
+    // Verify edge pixel (16, 16) in tile (1, 1) and interior tile (2, 1) pixel (32, 16)
+    green = 4278255360;
+    y16_off = 16 * 7680;
+    off_e = y16_off + 64;
+    we_idx = off_e >> 3;
+    w_e = fb@[we_idx];
+    px_e = w_e & 4294967295;
+    if (px_e != green) [
+        ret 4;
+    ]
+    off_i = y16_off + 128;
+    wi_idx = off_i >> 3;
+    w_i = fb@[wi_idx];
+    px_i = w_i & 4294967295;
+    if (px_i != green) [
+        ret 5;
+    ]
+    bit_m = bo_test_tile(mask, 2, 1);
+    if (bit_m != 1) [
+        ret 6;
+    ]
+
+    // 2. Translucent blue rect (32, 16, 16, 16, #0000FF80) overlapping ONLY tile (2, 1) over green
+    src_buf@[6 * 1] = 51;
+    src_buf@[7 * 1] = 50;
+    src_buf@[12 * 1] = 49;
+    src_buf@[13 * 1] = 54;
+    src_buf@[15 * 1] = 49;
+    src_buf@[16 * 1] = 54;
+    src_buf@[21 * 1] = 48;
+    src_buf@[22 * 1] = 48;
+    src_buf@[23 * 1] = 70;
+    src_buf@[24 * 1] = 70;
+    src_buf@[25 * 1] = 56;
+    src_buf@[26 * 1] = 48;
+
+    len2 = bake_core!(src_buf, 28, BAKE_KIND_TAPE, stape_out, arena);
+    if (len2 < 64) [
+        ret 7;
+    ]
+    rc2 = sagr_core!(stape_out, len2, surf, arena);
+    if (rc2 != 0) [
+        ret 8;
+    ]
+
+    // Tile (1, 1) outside overlay stays opaque green
+    w_e2 = fb@[we_idx];
+    px_e2 = w_e2 & 4294967295;
+    if (px_e2 != green) [
+        ret 9;
+    ]
+    // Tile (2, 1) pixel (32, 16): Source-Over #0000FF80 (B=128, A=128) on #00FF00FF -> G=127, B=128, A=255 = 4286611200
+    w_i2 = fb@[wi_idx];
+    px_i2 = w_i2 & 4294967295;
+    if (px_i2 != 4286611200) [
+        ret 10;
+    ]
+
+    // 3. Occluded pure green rect (32, 16, 16, 16) + foreground opaque red shutter (16, 16, 48, 32)
+    tape_sh = arena_alloc_words!(arena, 32);
+    // Line 0: "rect: 32 16 16 16 #00FF00FF\n" (bytes 0..27 of src_buf, patch back to green)
+    src_buf@[21 * 1] = 70;
+    src_buf@[22 * 1] = 70;
+    src_buf@[23 * 1] = 48;
+    src_buf@[24 * 1] = 48;
+    src_buf@[25 * 1] = 70;
+    src_buf@[26 * 1] = 70;
+    loop (cp:28 = 0 .. 28) [
+        tape_sh@[cp * 1] = src_buf@[cp * 1];
+    ]
+    // Line 1: "rect: 16 16 48 32 #FF0000FF shutter\n" (36 bytes at offset 28..63)
+    tape_sh@[28 * 1] = 114;
+    tape_sh@[29 * 1] = 101;
+    tape_sh@[30 * 1] = 99;
+    tape_sh@[31 * 1] = 116;
+    tape_sh@[32 * 1] = 58;
+    tape_sh@[33 * 1] = 32;
+    tape_sh@[34 * 1] = 49;
+    tape_sh@[35 * 1] = 54;
+    tape_sh@[36 * 1] = 32;
+    tape_sh@[37 * 1] = 49;
+    tape_sh@[38 * 1] = 54;
+    tape_sh@[39 * 1] = 32;
+    tape_sh@[40 * 1] = 52;
+    tape_sh@[41 * 1] = 56;
+    tape_sh@[42 * 1] = 32;
+    tape_sh@[43 * 1] = 51;
+    tape_sh@[44 * 1] = 50;
+    tape_sh@[45 * 1] = 32;
+    tape_sh@[46 * 1] = 35;
+    tape_sh@[47 * 1] = 70;
+    tape_sh@[48 * 1] = 70;
+    tape_sh@[49 * 1] = 48;
+    tape_sh@[50 * 1] = 48;
+    tape_sh@[51 * 1] = 48;
+    tape_sh@[52 * 1] = 48;
+    tape_sh@[53 * 1] = 70;
+    tape_sh@[54 * 1] = 70;
+    tape_sh@[55 * 1] = 32;
+    tape_sh@[56 * 1] = 115;
+    tape_sh@[57 * 1] = 104;
+    tape_sh@[58 * 1] = 117;
+    tape_sh@[59 * 1] = 116;
+    tape_sh@[60 * 1] = 116;
+    tape_sh@[61 * 1] = 101;
+    tape_sh@[62 * 1] = 114;
+    tape_sh@[63 * 1] = 10;
+
+    len3 = bake_core!(tape_sh, 64, BAKE_KIND_TAPE, stape_out, arena);
+    if (len3 < 64) [
+        ret 11;
+    ]
+    rc3 = sagr_core!(stape_out, len3, surf, arena);
+    if (rc3 != 0) [
+        ret 12;
+    ]
+    // Both tile (1, 1) and tile (2, 1) must now be solid red #FF0000FF (4278190335)
+    red = 4278190335;
+    w_e3 = fb@[we_idx];
+    px_e3 = w_e3 & 4294967295;
+    if (px_e3 != red) [
+        ret 13;
+    ]
+    w_i3 = fb@[wi_idx];
+    px_i3 = w_i3 & 4294967295;
+    if (px_i3 != red) [
+        ret 14;
+    ]
+    ret 0;
+]
+
 fn main!() [
     sys_mmap!(67108864);
     mmap_base = 536870912;
@@ -774,6 +949,10 @@ fn main!() [
     r16 = test_end_to_end_vector_shutter!(arena);
     if (r16 != 0) [ sys_exit!(116); ]
 
-    // All 16 tests passed!
+    // Test 17: End-to-End bake_core! -> sagr_core! Multi-Tile Carry & Blend
+    r17 = test_end_to_end_bake_to_sagr_core!(arena);
+    if (r17 != 0) [ sys_exit!(117); ]
+
+    // All 17 tests passed!
     sys_exit!(0);
 ]

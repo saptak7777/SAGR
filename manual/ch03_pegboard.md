@@ -20,8 +20,8 @@ Word 3: [                     Tile Y-Row Mask:64 (Punch-Card)                 ]
 
 1. **Word 0: Command & Appearance**
    * **Opcode (Bits 56..63)**: 
-     - `1 = PB_SEG_LINE` (Linear segment)
-     - `2 = PB_SEG_QUAD` (Monotonic quadratic Bézier segment)
+     - `1` = Active edge/curve cord
+     - `0` = NOP (reaped opaque-occluded cord)
    * **Effect (Bits 48..55)**:
      - `1 = EFFECT_PURE` (Standard alpha-blended vector geometry)
      - `2 = EFFECT_SHUTTER` (Opaque occlusion window for backward dead-code culling)

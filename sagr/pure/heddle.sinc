@@ -108,20 +108,6 @@ fn hd_backdrop_init!(backdrop_buf) [
     ret 0;
 ]
 
-fn hd_is_solid_interior(active_cords, backdrop_buf) [
-    if (active_cords != 0) [
-        ret 0;
-    ]
-    loop (r:TILE_DIM = 0 .. TILE_DIM) [
-        raw_bd = backdrop_buf@[r];
-        bd = bo_abs(raw_bd);
-        if (bd < 256) [
-            ret 0;
-        ]
-    ]
-    ret 1;
-]
-
 fn hd_broadcast_solid!(tile_words, solid_rgba) [
     hi = solid_rgba << 32;
     lo = solid_rgba & 4294967295;

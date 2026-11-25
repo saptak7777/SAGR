@@ -70,19 +70,14 @@ fn bake_emit_cord!(cords_buf, cord_idx_ptr, x0_q8, y0_q8, x1_q8, y1_q8, span_x0_
     ret 0;
 ]
 
-fn bake_tape_to_stape!(in_path, out_path, arena) [
-    off_scratch = arena_alloc_words!(arena, 2);
-    bytes_read = bake_read_file!(in_path, 1048576, off_scratch~, arena);
-    if (bytes_read < 0) [
-        ret 1;
-    ]
+fn bake_tape_core!(in_buf, bytes_read, out_buf, arena) [
     if (bytes_read < 1) [
         ret 2;
     ]
-    in_buf = off_scratch@[0];
+    off_scratch = arena_alloc_words!(arena, 2);
     off_scratch@[0] = 0;
 
-    cords_buf = arena_alloc_words!(arena, 16384);
+    cords_buf = out_buf + 64;
     cord_idx_scratch = arena_alloc_words!(arena, 2);
     cord_idx_scratch@[0] = 0;
 
@@ -214,6 +209,8 @@ fn bake_tape_to_stape!(in_path, out_path, arena) [
 
     payload_words = total_cords * 4;
     w0_dims = total_cords;
-    res = bake_write_sovereign_file!(out_path, BAKE_STAPE_MAGIC, w0_dims, cords_buf, payload_words, arena);
-    ret res;
+    hdr_len = bake_emit_header!(out_buf, BAKE_STAPE_MAGIC, w0_dims);
+    payload_bytes = payload_words << 3;
+    tot_len = hdr_len + payload_bytes;
+    ret tot_len;
 ]

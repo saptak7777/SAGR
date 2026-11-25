@@ -17,7 +17,6 @@ echo "=================================================================="
 # 1. Merge sources into test bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/pure/bitops.sinc \
     sagr/sys/slsp.sinc \
@@ -79,8 +78,23 @@ fi
 # 5. Build and Run Standalone SAGR Application
 echo ""
 echo "--- Testing Master Project Manifest Build (sagr/build.staff) ---"
-printf "[BUILD] Running staff orchestrator on sagr/build.staff... "
-./bin/staff sagr/build.staff scratch/sagr_app.safe
+printf "[BUILD] Running staff manifest build & compiling via sinc.elf... "
+./bin/staff sagr/build.staff scratch/sagr_app_staff.safe
+cat steel/sys/sys.sinc \
+    steel/sys/arena.sinc \
+    sagr/data/surface.sinc \
+    sagr/data/pegboard_defs.sinc \
+    sagr/pure/bitops.sinc \
+    sagr/pure/pegboard.sinc \
+    sagr/pure/flattener.sinc \
+    sagr/pure/heddle.sinc \
+    sagr/pure/loom.sinc \
+    sagr/pure/msdf.sinc \
+    sagr/sys/slsp.sinc \
+    sagr/sys/verify_sagr.sinc \
+    sagr/sys/entry.sinc \
+    steel/sys/driver_sagr_linux.sinc > scratch/sagr_app_bundle.sinc
+./bin/sinc.elf scratch/sagr_app_bundle.sinc scratch/sagr_app.safe
 ./bin/packager_bin scratch/sagr_app.safe ./scratch/sagr_app_bin
 chmod +x ./scratch/sagr_app_bin
 echo "OK"
@@ -89,18 +103,32 @@ printf "[RUN] Executing master application binary... "
 ./scratch/sagr_app_bin
 echo "OK (Exit 0)"
 
-printf "[CHECK] Verifying phase1_grid.ppm artifact... "
-if [ -f "phase1_grid.ppm" ]; then
-    SIZE=$(wc -c < phase1_grid.ppm)
-    if [ "$SIZE" -eq 6220817 ]; then
-        echo "OK ($SIZE bytes exact)"
-    else
-        echo "FAIL (Unexpected size: $SIZE)"
-        exit 1
-    fi
-else
-    echo "FAIL (phase1_grid.ppm missing)"
+echo ""
+echo "--- Stage A: Pure OS-Neutral sagr_core.safe Zero-Syscall Verification ---"
+printf "[BUILD] Compiling OS-neutral sagr_core.safe (0 Syscalls / 0 Driver)... "
+cat steel/sys/arena.sinc \
+    sagr/data/surface.sinc \
+    sagr/data/pegboard_defs.sinc \
+    sagr/pure/bitops.sinc \
+    sagr/pure/flattener.sinc \
+    sagr/pure/heddle.sinc \
+    sagr/pure/loom.sinc \
+    sagr/pure/msdf.sinc \
+    sagr/sys/slsp.sinc \
+    sagr/sys/entry.sinc > scratch/sagr_core_bundle.sinc
+
+echo 'fn main!(tape_buf, tape_bytes, surf_ptr, arena) [ ret sagr_core!(tape_buf, tape_bytes, surf_ptr, arena); ]' >> scratch/sagr_core_bundle.sinc
+
+./bin/sinc.elf scratch/sagr_core_bundle.sinc scratch/sagr_core.safe
+echo "OK"
+
+printf "[AUDIT] Checking sagr_core.safe for illegal syscalls (0F 05 / CD 80)... "
+CORE_DISASM=$(objdump -D -b binary -m i386:x86-64 scratch/sagr_core.safe)
+if grep -qE "\b(syscall|sysenter|int\s+\$0x80)\b" <<< "$CORE_DISASM"; then
+    echo "FAIL (Found OS syscall instructions in sagr_core.safe!)"
     exit 1
+else
+    echo "PASS (0 syscall instructions detected in sagr_core.safe)"
 fi
 
 echo ""
@@ -111,7 +139,6 @@ echo "=================================================================="
 # 1. Merge sources into Phase 2 test bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \
@@ -179,7 +206,6 @@ echo "=================================================================="
 # 1. Merge sources into Phase 3 test bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \
@@ -245,7 +271,6 @@ echo "=================================================================="
 # 1. Merge sources into Phase 4 test bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \
@@ -324,7 +349,6 @@ echo "=================================================================="
 # 1. Merge sources into Phase 5 test bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \
@@ -403,7 +427,6 @@ echo "=================================================================="
 # 1. Merge sources into Phase 6 test bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \
@@ -483,7 +506,6 @@ echo "=================================================================="
 # 1. Merge sources into Phase 7 test bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \
@@ -578,7 +600,6 @@ echo "=================================================================="
 # 1. Compile standalone cross-tile moire test
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
     sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \
@@ -629,21 +650,22 @@ echo "=================================================================="
 # 1. Merge sources into test bundle
 cat steel/sys/sys.sinc \
     steel/sys/arena.sinc \
-    steel/pure/bitset.sinc \
     sagr/data/surface.sinc \
+    sagr/data/pegboard_defs.sinc \
     sagr/pure/bitops.sinc \
     sagr/pure/flattener.sinc \
     sagr/pure/heddle.sinc \
     sagr/pure/loom.sinc \
     sagr/sys/slsp.sinc \
+    sagr/sys/entry.sinc \
     sassets/data/asset_defs.sinc \
     sassets/pure/stile.sinc \
     sassets/pure/stape.sinc \
     sassets/pure/bake_lexer.sinc \
-    sassets/sys/bake_io.sinc \
     sassets/sys/bake_ppm.sinc \
     sassets/sys/bake_tile.sinc \
     sassets/sys/bake_tape.sinc \
+    sassets/sys/entry.sinc \
     tests/test_assets.sinc > scratch/assets_test_bundle.sinc
 
 # 2. Compile via SINC Native Compiler
@@ -675,9 +697,10 @@ ASSET_TEST_NAMES=(
     "Test 11: .tape Wang quadratic Bézier flattening & horizontal culling"
     "Test 12: Lexer hex nibbles, whitespace skipping, and EOF clamping"
     "Test 13: Declarative style parser (pure vs. shutter vector cords)"
-    "Test 14: Sovereign file writer unopenable output error path (ret 4)"
+    "Test 14: Sovereign In-Memory Asset Compiler Invalid Kind Rejection (ret 1)"
     "Test 15: End-to-end .stile opaque beam flush & translucent composite"
     "Test 16: End-to-end .stape shutter reap occlusion & backdrop weave"
+    "Test 17: End-to-end bake_core! -> sagr_core! multi-tile carry & alpha blend"
 )
 
 set +e
@@ -701,7 +724,7 @@ fi
 
 echo ""
 echo "=================================================================="
-echo "  RESULT: ALL 16/16 SOVEREIGN ASSET TESTS PASSED BIT-PERFECT (EXIT 0)"
+echo "  RESULT: ALL 17/17 SOVEREIGN ASSET TESTS PASSED BIT-PERFECT (EXIT 0)"
 echo "=================================================================="
 
 # 5. Sovereign Asset Compiler Verification (bin/sagr-bake built via sassets/build.staff)
@@ -714,6 +737,35 @@ printf "[BUILD] Packaging standalone ELF via packager_bin... "
 ./bin/packager_bin scratch/sagr_bake.safe ./bin/sagr-bake
 chmod +x ./bin/sagr-bake
 echo "OK"
+
+echo ""
+echo "--- Stage A: Pure OS-Neutral sassets_core.safe Zero-Syscall Verification ---"
+printf "[BUILD] Compiling OS-neutral sassets_core.safe (0 Syscalls / 0 Driver)... "
+cat steel/sys/arena.sinc \
+    sagr/data/surface.sinc \
+    sagr/data/pegboard_defs.sinc \
+    sagr/pure/bitops.sinc \
+    sagr/pure/flattener.sinc \
+    sagr/pure/heddle.sinc \
+    sagr/pure/loom.sinc \
+    sagr/sys/slsp.sinc \
+    sassets/data/*.sinc \
+    sassets/pure/*.sinc \
+    sassets/sys/*.sinc > scratch/sassets_core_bundle.sinc
+
+echo 'fn main!(src_buf, src_len, kind, out_buf, arena) [ ret bake_core!(src_buf, src_len, kind, out_buf, arena); ]' >> scratch/sassets_core_bundle.sinc
+
+./bin/sinc.elf scratch/sassets_core_bundle.sinc scratch/sassets_core.safe
+echo "OK"
+
+printf "[AUDIT] Checking sassets_core.safe for illegal syscalls (0F 05 / CD 80)... "
+SASSETS_DISASM=$(objdump -D -b binary -m i386:x86-64 scratch/sassets_core.safe)
+if grep -qE "\b(syscall|sysenter|int\s+\$0x80)\b" <<< "$SASSETS_DISASM"; then
+    echo "FAIL (Found OS syscall instructions in sassets_core.safe!)"
+    exit 1
+else
+    echo "PASS (0 syscall instructions detected in sassets_core.safe)"
+fi
 
 echo ""
 echo "--- Testing Pure SINC Asset Compiler (bin/sagr-bake) ---"
@@ -807,6 +859,19 @@ if [ -f "./bin/sagr-bake" ]; then
         exit 1
     fi
 
+    printf "[CHECK] Verifying CLI unknown extension fail-fast error path (exit 1)... "
+    echo "P6 1 1 255 0 0 0" > scratch/cli_bad.unknown
+    set +e
+    ./bin/sagr-bake scratch/cli_bad.unknown scratch/out.stile > /dev/null 2>&1
+    BAD_EXT_EXIT=$?
+    set -e
+    if [ "$BAD_EXT_EXIT" -eq 1 ]; then
+        echo "OK (Exit 1)"
+    else
+        echo "FAIL (Unexpected exit: $BAD_EXT_EXIT)"
+        exit 1
+    fi
+
     printf "[CHECK] Verifying .stile compilation (PPM -> .stile)... "
     ./bin/sagr-bake scratch/battle_game_assets/tileset_dungeon.ppm scratch/dungeon_sinc_test.stile > /dev/null 2>&1
     SIZE_STILE=$(wc -c < scratch/dungeon_sinc_test.stile)
@@ -860,9 +925,9 @@ echo "  Phase 5 (Heddle Backdrop & Shutter):       12/12 PASSED"
 echo "  Phase 6 (MSDF Typography):                 12/12 PASSED"
 echo "  Phase 7 (Deterministic Golden Oracle):     11/11 PASSED"
 echo "  Standalone Cross-Tile Regression:           1/1  PASSED"
-echo "  Sovereign Assets (.stile & .stape):        16/16 PASSED"
+echo "  Sovereign Assets (.stile & .stape):        17/17 PASSED"
 echo "=================================================================="
-echo "  TOTAL TESTS PASSED:                       100/100 BIT-PERFECT"
+echo "  TOTAL TESTS PASSED:                       101/101 BIT-PERFECT"
 echo "  CORE ENGINE STATUS: 100% CLEAN & VERIFIED (EXIT 0)"
 echo "=================================================================="
 

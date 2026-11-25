@@ -1,0 +1,29 @@
+// ==========================================
+// steel/sys/driver_sagr_linux.sinc
+// Standalone Linux CLI Driver for SAGR
+// ==========================================
+
+fn main!() [
+    sys_mmap!(67108864);
+    mmap_base = 536870912;
+    arena = arena_init!(mmap_base~, 67108864);
+    if (arena == 0) [
+        sys_exit!(1);
+    ]
+    tape_buf = arena_alloc_words!(arena, 16384);
+    mask_ptr = arena_alloc_words!(arena, SLSP_DIRTY_WORDS);
+    tile_words = arena_alloc_words!(arena, TILE_WORDS);
+    out_hashes = arena_alloc_words!(arena, 16);
+    if (out_hashes == 0) [
+        sys_exit!(2);
+    ]
+    vf_verify_golden_oracle!(tape_buf, mask_ptr, tile_words, out_hashes);
+    loop (i:VF_SCENES_COUNT = 0 .. VF_SCENES_COUNT) [
+        h = out_hashes@[i];
+        if (h == 0) [
+            sys_exit!(3);
+        ]
+    ]
+    sys_exit!(0);
+]
+

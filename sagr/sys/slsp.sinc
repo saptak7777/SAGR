@@ -3,6 +3,13 @@
 // SLSP Surface Memory Management & Beam Flush
 // ==========================================
 
+fn slsp_clear_dirty!(mask_ptr) [
+    loop (ci:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
+        mask_ptr@[ci] = 0;
+    ]
+    ret 0;
+]
+
 fn slsp_create!(arena, width, height, format) [
     stride = width * 4;
     fb_bytes = stride * height;
@@ -15,9 +22,7 @@ fn slsp_create!(arena, width, height, format) [
     if (mask_ptr == 0) [
         ret 0;
     ]
-    loop (zi:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
-        mask_ptr@[zi] = 0;
-    ]
+    slsp_clear_dirty!(mask_ptr);
     desc_ptr = arena_alloc_words!(arena, SLSP_DESC_WORDS);
     if (desc_ptr == 0) [
         ret 0;
@@ -29,13 +34,6 @@ fn slsp_create!(arena, width, height, format) [
     desc_ptr.SLSP_WORD_FB_PTR = fb_ptr;
     desc_ptr.SLSP_WORD_MASK_PTR = mask_ptr;
     ret desc_ptr;
-]
-
-fn slsp_clear_dirty!(mask_ptr) [
-    loop (ci:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
-        mask_ptr@[ci] = 0;
-    ]
-    ret 0;
 ]
 
 fn slsp_stamp_tile!(mask_ptr, tx, ty) [
@@ -90,49 +88,21 @@ fn slsp_beam_flush_tile!(fb_base, tx, ty, stride, tile_words~) [
     ret 0;
 ]
 
-fn slsp_write_ppm_header!(fd, hdr_buf) [
-    hdr_buf@[0 * 1] = 80;
-    hdr_buf@[1 * 1] = 54;
-    hdr_buf@[2 * 1] = 10;
-    hdr_buf@[3 * 1] = 49;
-    hdr_buf@[4 * 1] = 57;
-    hdr_buf@[5 * 1] = 50;
-    hdr_buf@[6 * 1] = 48;
-    hdr_buf@[7 * 1] = 32;
-    hdr_buf@[8 * 1] = 49;
-    hdr_buf@[9 * 1] = 48;
-    hdr_buf@[10 * 1] = 56;
-    hdr_buf@[11 * 1] = 48;
-    hdr_buf@[12 * 1] = 10;
-    hdr_buf@[13 * 1] = 50;
-    hdr_buf@[14 * 1] = 53;
-    hdr_buf@[15 * 1] = 53;
-    hdr_buf@[16 * 1] = 10;
-    sys_write!(fd, hdr_buf, 17);
-    ret 0;
-]
-
-fn slsp_dump_ppm!(path_buf, fb_base, width, height, stride, row_scratch) [
-    fd = sys_open_create!(path_buf);
-    if (fd < 0) [
-        ret -1;
-    ]
-    slsp_write_ppm_header!(fd, row_scratch);
-    row_bytes = width * 3;
-    loop (y:1080 = 0 .. height) [
-        fb_row = fb_base + (y * stride);
-        loop (x:1920 = 0 .. width) [
-            px_ptr = fb_row + (x * 4);
-            r = px_ptr@[0 * 1];
-            g = px_ptr@[1 * 1];
-            b = px_ptr@[2 * 1];
-            out_ptr = row_scratch + (x * 3);
-            out_ptr@[0 * 1] = r;
-            out_ptr@[1 * 1] = g;
-            out_ptr@[2 * 1] = b;
+fn slsp_read_tile!(fb_base, tx, ty, stride, tile_words) [
+    y_pixel_off = ty * TILE_DIM;
+    y_byte_off = y_pixel_off * stride;
+    x_byte_off = tx * 64;
+    y_off = fb_base + y_byte_off;
+    src_base = y_off + x_byte_off;
+    loop (row:TILE_DIM = 0 .. TILE_DIM) [
+        row_byte_off = row * stride;
+        row_src = src_base + row_byte_off;
+        tile_row_off = row * TILE_SCANLINE_WORDS;
+        loop (col:TILE_SCANLINE_WORDS = 0 .. TILE_SCANLINE_WORDS) [
+            word_idx = tile_row_off + col;
+            val = row_src@[col];
+            tile_words@[word_idx] = val;
         ]
-        sys_write!(fd, row_scratch, row_bytes);
     ]
-    sys_close!(fd);
     ret 0;
 ]

@@ -32,16 +32,11 @@ fn bake_sample_ppm_px(in_buf, pixel_data_start, width, height, px, py) [
     ret px_val;
 ]
 
-fn bake_ppm_to_stile!(in_path, out_path, arena) [
-    off_scratch = arena_alloc_words!(arena, 2);
-    bytes_read = bake_read_file!(in_path, 16777216, off_scratch~, arena);
-    if (bytes_read < 0) [
-        ret 1;
-    ]
+fn bake_ppm_core!(in_buf, bytes_read, out_buf, arena) [
     if (bytes_read < 10) [
         ret 2;
     ]
-    in_buf = off_scratch@[0];
+    off_scratch = arena_alloc_words!(arena, 2);
 
     // Verify P6 header
     b0 = in_buf@[0 * 1];
@@ -74,7 +69,7 @@ fn bake_ppm_to_stile!(in_path, out_path, arena) [
 
     total_tiles = tiles_x * tiles_y;
     payload_words = total_tiles * 128;
-    payload_buf = arena_alloc_words!(arena, payload_words);
+    payload_buf = out_buf + 64;
 
     // Slice micro-tiles into 128-word blocks
     loop (ty:4096 = 0 .. tiles_y) [
@@ -110,6 +105,8 @@ fn bake_ppm_to_stile!(in_path, out_path, arena) [
 
     sh_tx = tiles_x << 16;
     w0_dims = sh_tx | tiles_y;
-    res = bake_write_sovereign_file!(out_path, BAKE_STILE_MAGIC, w0_dims, payload_buf, payload_words, arena);
-    ret res;
+    hdr_len = bake_emit_header!(out_buf, BAKE_STILE_MAGIC, w0_dims);
+    payload_bytes = payload_words << 3;
+    tot_len = hdr_len + payload_bytes;
+    ret tot_len;
 ]

@@ -12,10 +12,13 @@ artifact sagr [
 deps [
     steel/sys/sys.sinc;
     steel/sys/arena.sinc;
-    steel/pure/bitset.sinc;
+]
+
+driver [
+    steel/sys/driver_sagr_linux.sinc;
 ]
 
 flags [
     optimize = 3;
-    heap     = 1000000000;
+    heap     = 67108864;
 ]

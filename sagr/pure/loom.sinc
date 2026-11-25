@@ -3,11 +3,6 @@
 // The Jacquard Loom Core: Unsorted Warp Pluck & 4-Cycle Weft Shuttle
 // ==========================================
 
-fn lm_abs(v) [
-    res = bo_abs(v);
-    ret res;
-]
-
 fn lm_clamp(val, lo, hi) [
     c_lo = lm_max(val, lo);
     res = lm_min(c_lo, hi);
@@ -223,6 +218,8 @@ fn lm_weave_tile_backdrop!(tape, tape_len, tile_x, tile_y, winding_rule, in_back
         ]
     ]
 
+    cov_or = 0;
+    cov_and = 256;
     loop (r:TILE_DIM = 0 .. TILE_DIM) [
         lm_weft_row!(warp_scratch, r);
         row_off = r * 16;
@@ -245,9 +242,15 @@ fn lm_weave_tile_backdrop!(tape, tape_len, tile_x, tile_y, winding_rule, in_back
                 cov = lm_resolve_evenodd(raw_weft);
             ]
             out_coverage@[idx] = cov;
+            cov_or = cov_or | cov;
+            cov_and = cov_and & cov;
         ]
     ]
-    ret 0;
+    all_full = cov_and == 256;
+    res_hi = all_full << 32;
+    res_lo = cov_or & 4294967295;
+    res = res_hi | res_lo;
+    ret res;
 ]
 
 fn lm_weave_tile!(tape, tape_len, tile_x, tile_y, winding_rule, warp_scratch, out_coverage) [

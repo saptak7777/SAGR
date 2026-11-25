@@ -108,21 +108,32 @@ fn test_hd_reaper!(tape, mask_ptr) [
     ret 0;
 ]
 
-fn test_hd_solid_interior_folder!(backdrop_buf, tile_words) [
-    hd_backdrop_init!(backdrop_buf);
+fn test_hd_solid_interior_folder!(tape, in_bd, out_bd, warp, cov, tile_words) [
+    hd_backdrop_init!(in_bd);
 
-    // Case 1: Incomplete backdrop (< 256) -> not solid interior
-    backdrop_buf@[0] = 128;
-    if (hd_is_solid_interior(0, backdrop_buf) != 0) [ ret 1; ]
+    // Case 1: Incomplete backdrop (< 256) -> all_full == 0, non-zero coverage
+    in_bd@[0] = 128;
+    wv1 = lm_weave_tile_backdrop!(tape, 0, 1, 0, 0, in_bd, out_bd, warp, cov);
+    all1 = wv1 >> 32;
+    if (all1 != 0) [ ret 1; ]
 
-    // Case 2: Active cords exist -> not solid interior
+    // Case 2: Active vertical cord inside tile at x=8px -> partial coverage (all_full == 0)
+    hd_backdrop_init!(in_bd);
+    tape@[0] = (1 << 56) | 4278190335;
+    tape@[1] = (2048 << 32) | 0;
+    tape@[2] = (2048 << 32) | 4096;
+    tape@[3] = 65535;
+    wv2 = lm_weave_tile_backdrop!(tape, 1, 0, 0, 0, in_bd, out_bd, warp, cov);
+    all2 = wv2 >> 32;
+    if (all2 != 0) [ ret 2; ]
+
+    // Case 3: 0 cords and all 16 rows carry 256 -> all_full == 1 (solid interior)
     loop (r:16 = 0 .. 16) [
-        backdrop_buf@[r] = 256;
+        in_bd@[r] = 256;
     ]
-    if (hd_is_solid_interior(1, backdrop_buf) != 0) [ ret 2; ]
-
-    // Case 3: 0 cords and all 16 rows carry 256 -> solid interior!
-    if (hd_is_solid_interior(0, backdrop_buf) != 1) [ ret 3; ]
+    wv3 = lm_weave_tile_backdrop!(tape, 0, 1, 0, 0, in_bd, out_bd, warp, cov);
+    all3 = wv3 >> 32;
+    if (all3 != 1) [ ret 3; ]
 
     // Case 4: Fast broadcast
     solid_color = 4281488112; // Crimson
@@ -415,7 +426,7 @@ fn main!() [
     r4 = test_hd_reaper!(tape, shutter_mask);
     if (r4 != 0) [ sys_exit!(104); ]
 
-    r5 = test_hd_solid_interior_folder!(backdrop_in, tile_words_dst);
+    r5 = test_hd_solid_interior_folder!(tape, backdrop_in, backdrop_out, warp_scratch, cov_buf, tile_words_dst);
     if (r5 != 0) [ sys_exit!(105); ]
 
     r6 = test_hd_backdrop_carry_multitile!(tape, backdrop_in, backdrop_out, warp_scratch, cov_buf);
