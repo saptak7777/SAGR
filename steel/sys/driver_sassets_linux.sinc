@@ -20,34 +20,44 @@ fn baker_str_len(s) [
     ret len;
 ]
 
+fn baker_pack4(path, off) [
+    acc = 0;
+    loop (k:4 = 0 .. 4) [
+        idx = off + k;
+        b = path@[idx * 1];
+        sh = k << 3;
+        b_sh = b << sh;
+        acc = acc | b_sh;
+    ]
+    ret acc;
+]
+
 fn baker_detect_kind(path, len) [
     if (len < 5) [
         ret 0;
     ]
     off4 = len - 4;
-    ext4 = 0;
-    loop (k:4 = 0 .. 4) [
-        idx = off4 + k;
-        b = path@[idx * 1];
-        sh = k << 3;
-        b_sh = b << sh;
-        ext4 = ext4 | b_sh;
-    ]
+    ext4 = baker_pack4(path, off4);
     if (ext4 == 1836085294) [
         ret BAKE_KIND_PPM;
     ]
-    if (len < 6) [
+    if (len < 10) [
         ret 0;
     ]
-    off5 = len - 5;
-    dot = path@[off5 * 1];
+    if (ext4 != 1735554094) [
+        ret 0;
+    ]
+    off9 = len - 9;
+    dot = path@[off9 * 1];
     if (dot != 46) [
         ret 0;
     ]
-    if (ext4 == 1701603700) [
+    off8 = len - 8;
+    sub4 = baker_pack4(path, off8);
+    if (sub4 == 1701603700) [
         ret BAKE_KIND_TILE;
     ]
-    if (ext4 == 1701863796) [
+    if (sub4 == 1701863796) [
         ret BAKE_KIND_TAPE;
     ]
     ret 0;

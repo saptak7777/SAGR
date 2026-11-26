@@ -28,11 +28,11 @@ SAGR relies on seven core technical constraints and architectural invariants:
 SAGR divides raster and vector workflows into a unified 4-format pipeline:
 
 ```
-  Human-Readable Source              Pure SINC Baker                L1-Aligned Binary Asset
-  ─────────────────────              ───────────────                ───────────────────────
-  .tile  (ASCII Palette/Grid)   ──►  bin/sagr-bake             ──►  .stile (64-byte Header + 1KB Micro-Tiles)
-  .ppm   (Netpbm P6 Image)      ──►  (sassets/build.staff)    ──►  .stile (O(1) Direct Beam Flush)
-  .tape  (ASCII Polygons/Curves)──►                           ──►  .stape (64-byte Header + 32-byte Cords)
+  Human-Readable Source              SINC + SAGR Pipeline           L1-Aligned Binary Asset
+  ─────────────────────              ────────────────────           ───────────────────────
+  .tile  (ASCII Palette/Grid)   ──►  trg_encode ─► sagr-bake.elf ─► .stile (64-byte Header + 1KB Micro-Tiles)
+  .ppm   (Netpbm P6 Image)      ──►  bin/sagr-bake.elf           ─► .stile (O(1) Direct Beam Flush)
+  .tape  (ASCII Polygons/Curves)──►  trg_encode ─► sagr-bake.elf ─► .stape (64-byte Header + 32-byte Cords)
 ```
 
 * **`.stile` (Sovereign Tile)**: 64-byte L1 cache-aligned binary header (`magic='STIL'`, `tiles_x`, `tiles_y`, reserved pad) followed by contiguous $1{,}024$-byte $16 \times 16$ micro-tiles in premultiplied RGBA8. Enables direct $O(1)$ pointer math (`stile_get_tile_ptr`) and zero-overhead opaque beam flushing (`stile_flush_opaque!`) directly into display framebuffers.
@@ -132,10 +132,10 @@ SAGR includes an experimental desktop window editor proof-of-concept demonstrati
 ### Prerequisites
 * Linux x86-64 (or Windows/bare-metal target with SINC packager)
 * CPU with BMI1/BMI2 instructions (`lzcnt`, `tzcnt`, `blsr`)
-* The included bootstrap SINC toolchain in `bin/` (`sinc.elf`, `packager_bin`, `staff`)
+* The included bootstrap SINC toolchain in `bin/` (`sinc.elf`, `packager_bin`, `staff`, `trg_encode`, `sagr-bake`, `sagr-bake.elf`)
 
 ### 1. Build and Run the Complete Test Suite
-SAGR features an exhaustive 101-assertion test harness covering bitops, culling, Wang flattening, Loom area integrals, MSDF typography, the 12-scene Golden Oracle, and the Sovereign Asset pipeline:
+SAGR features an exhaustive 102-assertion test harness covering bitops, culling, Wang flattening, Loom area integrals, MSDF typography, the 12-scene Golden Oracle, and the Sovereign Asset pipeline:
 
 ```bash
 ./tests/run_tests.sh
@@ -152,9 +152,9 @@ SAGR features an exhaustive 101-assertion test harness covering bitops, culling,
   Phase 6 (MSDF Typography):                 12/12 PASSED
   Phase 7 (Deterministic Golden Oracle):     11/11 PASSED
   Standalone Cross-Tile Regression:           1/1  PASSED
-  Sovereign Assets (.stile & .stape):        17/17 PASSED
+  Sovereign Assets (.stile, .stape, .trg):   18/18 PASSED
 ==================================================================
-  TOTAL TESTS PASSED:                       101/101 BIT-PERFECT
+  TOTAL TESTS PASSED:                       102/102 BIT-PERFECT
   CORE ENGINE STATUS: 100% CLEAN & VERIFIED (EXIT 0)
 ==================================================================
 ```
@@ -213,7 +213,7 @@ fn main!() [
 
 ```
 SAGR/
-├── bin/                       # Bootstrap SINC toolchain (sinc.elf, packager_bin, staff, sagr-bake)
+├── bin/                       # Bootstrap SINC toolchain (sinc.elf, packager_bin, staff, trg_encode, sagr-bake, sagr-bake.elf)
 ├── examples/
 │   ├── dino/                  # Playable Chrome Dino terminal runner
 │   │   ├── dino.sinc          # Game logic, physics & multi-color pixel renderer
@@ -256,27 +256,27 @@ SAGR/
 │       ├── slsp.sinc          # Linear surface descriptor, tile read & beam flush
 │       └── verify_sagr.sinc   # FNV-1a 64-bit hash engine & 12-scene golden oracle
 ├── sassets/                   # Sovereign Asset Subsystem (OS-Neutral Core, 823 LOC)
-│   ├── build.staff            # Manifest for bin/sagr-bake (artifact sassets)
+│   ├── build.staff            # Manifest for bin/sagr-bake.elf (artifact sassets)
 │   ├── data/
 │   │   └── asset_defs.sinc    # BAKE_STILE_MAGIC, BAKE_KIND_* & effect constants
 │   ├── pure/
-│   │   ├── bake_lexer.sinc    # Pure hex, whitespace, style, int parsers & premult math
+│   │   ├── bake_lexer.sinc    # TRG container check, TRG/PPM int, hex, style & premult math
 │   │   ├── stile.sinc         # Micro-tile runtime helpers & shared 64B header emitter
 │   │   └── stape.sinc         # Vector tape runtime helpers (shutter reap & Loom weave)
 │   └── sys/
 │       ├── bake_ppm.sinc      # Netpbm P6 image core (RAM -> .stile)
-│       ├── bake_tape.sinc     # ASCII vector .tape -> .stape core with Wang Quads
-│       ├── bake_tile.sinc     # ASCII palette .tile -> .stile RGBA core
+│       ├── bake_tape.sinc     # TRG-native .tape.trg -> .stape core with Wang Quads
+│       ├── bake_tile.sinc     # TRG-native .tile.trg -> .stile RGBA core
 │       └── entry.sinc         # In-memory bake_core! SPINE dispatcher
-├── steel/                     # SINC Runtime & OS Platform Drivers (235 LOC)
+├── steel/                     # SINC Runtime & OS Platform Drivers (245 LOC)
 │   └── sys/
 │       ├── arena.sinc         # Linear bump allocator
 │       ├── driver_sagr_linux.sinc    # Standalone Linux harness for sagr/build.staff
-│       ├── driver_sassets_linux.sinc # Linux CLI driver for bin/sagr-bake
+│       ├── driver_sassets_linux.sinc # Linux CLI driver for bin/sagr-bake.elf
 │       └── sys.sinc           # Raw Linux syscall interface (sys_mmap, sys_write)
-└── tests/                     # 101-Assertion Bit-Perfect Test Suite
+└── tests/                     # 102-Assertion Bit-Perfect Test Suite
     ├── run_tests.sh           # Master test runner, Stage A audits & CLI verification
-    ├── test_assets.sinc       # 17-assertion sovereign asset verification suite
+    ├── test_assets.sinc       # 18-assertion sovereign asset verification suite
     ├── test_phase1.sinc .. test_phase7.sinc # Subsystem test suites
     └── test_failing_cross_tile_moire.sinc # Multi-tile backdrop tension regression test
 ```

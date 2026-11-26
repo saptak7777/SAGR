@@ -14,9 +14,9 @@ SAGR incinerates runtime format parsing:
 * **Zero Runtime Decoders**: Zero PNG, JPEG, SVG, or TTF parsers in the binary.
 * **Pre-Baked Silicon Alignment**: Assets are compiled ahead of time (AOT) into memory-mapped arrays matching x86-64-v4 register lanes and cache lines.
 * **Sibling Protocol (Law 12)**: Asset compilation strictly mirrors SINC compiler compilation:
-  - `.sinc` (ASCII code) $\to$ `sinc.elf` $\to$ `.safe` (native machine code)
-  - `.tape` (ASCII vectors) $\to$ `bin/sagr-bake` $\to$ `.stape` (32-byte Cord Quads)
-  - `.ppm` / `.tile` (ASCII / Netpbm rasters) $\to$ `bin/sagr-bake` $\to$ `.stile` (1,024-byte micro-tiles)
+  - `.sinc` (UTF-8 code) $\to$ `bin/trg_encode` $\to$ `.trg` $\to$ `sinc.elf` $\to$ `.safe` (native machine code)
+  - `.tape` (human vectors) $\to$ `bin/trg_encode` $\to$ `.tape.trg` $\to$ `bin/sagr-bake.elf` $\to$ `.stape` (32-byte Cord Quads)
+  - `.tile` (human palette) $\to$ `bin/trg_encode` $\to$ `.tile.trg` $\to$ `bin/sagr-bake.elf` $\to$ `.stile` (1,024-byte micro-tiles); `.ppm` $\to$ `bin/sagr-bake.elf` directly
 
 ---
 
@@ -126,37 +126,37 @@ fn stape_reap!(stape_ptr, shutter_mask) [
 
 ---
 
-## 5. The Ahead-of-Time Compiler (`bin/sagr-bake`)
+## 5. The Ahead-of-Time Compiler (`bin/sagr-bake` & `bin/sagr-bake.elf`)
 
-The sovereign asset compiler core lives in OS-neutral SINC inside `sassets/`, paired with the Linux CLI driver (`steel/sys/driver_sassets_linux.sinc`) via `./bin/staff sassets/build.staff`:
+The sovereign asset compiler core lives in OS-neutral TRG-native SINC inside `sassets/` (paired with `steel/sys/driver_sassets_linux.sinc` via `./bin/staff sassets/build.staff` to build `bin/sagr-bake.elf`, while `bin/sagr-bake` auto-invokes `SINC`'s `bin/trg_encode` on `.tile` / `.tape` files just like `bin/sinc`):
 
 ```
 sassets/
-├── build.staff            # Manifest for bin/sagr-bake (links driver_sassets_linux.sinc)
+├── build.staff            # Manifest for bin/sagr-bake.elf (links driver_sassets_linux.sinc)
 ├── data/
 │   └── asset_defs.sinc    # BAKE_STILE_MAGIC, BAKE_KIND_*, effect constants (BAKE_STAPE_MAGIC in pegboard_defs.sinc)
 ├── pure/
-│   ├── bake_lexer.sinc    # Pure hex, int, and style parsers; premult math
+│   ├── bake_lexer.sinc    # TRG container check, TRG/PPM int, hex, style & premult math
 │   ├── stile.sinc         # Micro-tile helpers & shared 64-byte header emitter
 │   └── stape.sinc         # Vector tape runtime helpers (shutter reap & Loom weave)
 └── sys/
     ├── bake_ppm.sinc      # Netpbm P6 RAM -> .stile core (bake_ppm_core!)
-    ├── bake_tape.sinc     # ASCII .tape -> .stape core with Wang Quads (bake_tape_core!)
-    ├── bake_tile.sinc     # ASCII .tile -> .stile RGBA core (bake_tile_core!)
+    ├── bake_tape.sinc     # TRG-native .tape.trg -> .stape core with Wang Quads (bake_tape_core!)
+    ├── bake_tile.sinc     # TRG-native .tile.trg -> .stile RGBA core (bake_tile_core!)
     └── entry.sinc         # In-memory bake_core! SPINE dispatcher
 ```
 
 ### 5.1 CLI Usage Guide
 
 ```bash
-# Compile ASCII raster tile grid to .stile
+# Host wrapper auto-encodes .tile/.tape via bin/trg_encode before bin/sagr-bake.elf
 ./bin/sagr-bake hero.tile assets/hero.stile
-
-# Compile Netpbm P6 texture to .stile
 ./bin/sagr-bake texture.ppm assets/texture.stile
-
-# Compile ASCII vector tape to .stape
 ./bin/sagr-bake ui_elements.tape assets/ui_elements.stape
+
+# Or invoke TRG-native bin/sagr-bake.elf directly on pre-encoded .tile.trg / .tape.trg
+./bin/trg_encode hero.tile scratch/hero.tile.trg
+./bin/sagr-bake.elf scratch/hero.tile.trg assets/hero.stile
 ```
 
 ### 5.2 Human-Readable Source Formats

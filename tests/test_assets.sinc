@@ -412,24 +412,25 @@ fn test_tape_bezier_quad!(arena) [
     ret 0;
 ]
 
-// Test 12: Lexer Hex Nibble Decoding, Whitespace Skipping, and EOF Clamping
+// Test 12: TRG Lexer Hex Nibble Decoding, Horizontal WS Skipping, and EOF Clamping
 fn test_lexer_hex_and_ws!(arena) [
-    n0 = bake_hex_nibble(48);
+    // TRG: '0'=52, '9'=61, 'A'=0, 'F'=5, 'a'=26, 'f'=31, 'x'=49
+    n0 = bake_hex_nibble(52);
     if (n0 != 0) [ ret 1; ]
-    n9 = bake_hex_nibble(57);
+    n9 = bake_hex_nibble(61);
     if (n9 != 9) [ ret 2; ]
 
-    na = bake_hex_nibble(65);
+    na = bake_hex_nibble(0);
     if (na != 10) [ ret 3; ]
-    nf = bake_hex_nibble(70);
+    nf = bake_hex_nibble(5);
     if (nf != 15) [ ret 4; ]
 
-    nla = bake_hex_nibble(97);
+    nla = bake_hex_nibble(26);
     if (nla != 10) [ ret 5; ]
-    nlf = bake_hex_nibble(102);
+    nlf = bake_hex_nibble(31);
     if (nlf != 15) [ ret 6; ]
 
-    ninval = bake_hex_nibble(120);
+    ninval = bake_hex_nibble(49);
     if (ninval != 0) [ ret 7; ]
 
     buf = arena_alloc_words!(arena, 4);
@@ -438,21 +439,22 @@ fn test_lexer_hex_and_ws!(arena) [
     buf@[2] = 0;
     buf@[3] = 0;
 
-    buf@[0 * 1] = 32;
-    buf@[1 * 1] = 32;
-    buf@[2 * 1] = 32;
-    buf@[3 * 1] = 9;
-    buf@[4 * 1] = 32;
-    buf@[5 * 1] = 32;
-    buf@[6 * 1] = 35;
-    buf@[7 * 1] = 70;
-    buf@[8 * 1] = 70;
-    buf@[9 * 1] = 48;
-    buf@[10 * 1] = 48;
-    buf@[11 * 1] = 56;
-    buf@[12 * 1] = 48;
-    buf@[13 * 1] = 56;
-    buf@[14 * 1] = 48;
+    // TRG: "   \t  #FF008080" (' '=240, '\t'=242, '#'=127, 'F'=5, '0'=52, '8'=60)
+    buf@[0 * 1] = 240;
+    buf@[1 * 1] = 240;
+    buf@[2 * 1] = 240;
+    buf@[3 * 1] = 242;
+    buf@[4 * 1] = 240;
+    buf@[5 * 1] = 240;
+    buf@[6 * 1] = 127;
+    buf@[7 * 1] = 5;
+    buf@[8 * 1] = 5;
+    buf@[9 * 1] = 52;
+    buf@[10 * 1] = 52;
+    buf@[11 * 1] = 60;
+    buf@[12 * 1] = 52;
+    buf@[13 * 1] = 60;
+    buf@[14 * 1] = 52;
 
     off_ptr = arena_alloc_words!(arena, 1);
     off_ptr@[0] = 0;
@@ -471,25 +473,25 @@ fn test_lexer_hex_and_ws!(arena) [
     ret 0;
 ]
 
-// Test 13: Declarative Style Parser (Pure vs. Shutter Vector Cords)
+// Test 13: Declarative TRG Style Parser (Pure vs. Shutter Vector Cords)
 fn test_style_parser!(arena) [
     buf = arena_alloc_words!(arena, 8);
-    // "#FF0000FF pure\n"
-    buf@[0 * 1] = 35;  // '#'
-    buf@[1 * 1] = 70;  // 'F'
-    buf@[2 * 1] = 70;  // 'F'
-    buf@[3 * 1] = 48;  // '0'
-    buf@[4 * 1] = 48;  // '0'
-    buf@[5 * 1] = 48;  // '0'
-    buf@[6 * 1] = 48;  // '0'
-    buf@[7 * 1] = 70;  // 'F'
-    buf@[8 * 1] = 70;  // 'F'
-    buf@[9 * 1] = 32;  // ' '
-    buf@[10 * 1] = 112; // 'p'
-    buf@[11 * 1] = 117; // 'u'
-    buf@[12 * 1] = 114; // 'r'
-    buf@[13 * 1] = 101; // 'e'
-    buf@[14 * 1] = 10;  // '\n'
+    // TRG: "#FF0000FF pure\n" ('#'=127,'F'=5,'0'=52,' '=240,'p'=41,'u'=46,'r'=43,'e'=30,'\n'=241)
+    buf@[0 * 1] = 127;
+    buf@[1 * 1] = 5;
+    buf@[2 * 1] = 5;
+    buf@[3 * 1] = 52;
+    buf@[4 * 1] = 52;
+    buf@[5 * 1] = 52;
+    buf@[6 * 1] = 52;
+    buf@[7 * 1] = 5;
+    buf@[8 * 1] = 5;
+    buf@[9 * 1] = 240;
+    buf@[10 * 1] = 41;
+    buf@[11 * 1] = 46;
+    buf@[12 * 1] = 43;
+    buf@[13 * 1] = 30;
+    buf@[14 * 1] = 241;
 
     off_ptr = arena_alloc_words!(arena, 1);
 
@@ -505,25 +507,25 @@ fn test_style_parser!(arena) [
         ret 3;
     ]
 
-    // "#00FF00FF shutter\n"
-    buf@[0 * 1] = 35;  // '#'
-    buf@[1 * 1] = 48;  // '0'
-    buf@[2 * 1] = 48;  // '0'
-    buf@[3 * 1] = 70;  // 'F'
-    buf@[4 * 1] = 70;  // 'F'
-    buf@[5 * 1] = 48;  // '0'
-    buf@[6 * 1] = 48;  // '0'
-    buf@[7 * 1] = 70;  // 'F'
-    buf@[8 * 1] = 70;  // 'F'
-    buf@[9 * 1] = 32;  // ' '
-    buf@[10 * 1] = 115; // 's'
-    buf@[11 * 1] = 104; // 'h'
-    buf@[12 * 1] = 117; // 'u'
-    buf@[13 * 1] = 116; // 't'
-    buf@[14 * 1] = 116; // 't'
-    buf@[15 * 1] = 101; // 'e'
-    buf@[16 * 1] = 114; // 'r'
-    buf@[17 * 1] = 10;  // '\n'
+    // TRG: "#00FF00FF shutter\n" ('s'=44,'h'=33,'u'=46,'t'=45,'e'=30,'r'=43,'\n'=241)
+    buf@[0 * 1] = 127;
+    buf@[1 * 1] = 52;
+    buf@[2 * 1] = 52;
+    buf@[3 * 1] = 5;
+    buf@[4 * 1] = 5;
+    buf@[5 * 1] = 52;
+    buf@[6 * 1] = 52;
+    buf@[7 * 1] = 5;
+    buf@[8 * 1] = 5;
+    buf@[9 * 1] = 240;
+    buf@[10 * 1] = 44;
+    buf@[11 * 1] = 33;
+    buf@[12 * 1] = 46;
+    buf@[13 * 1] = 45;
+    buf@[14 * 1] = 45;
+    buf@[15 * 1] = 30;
+    buf@[16 * 1] = 43;
+    buf@[17 * 1] = 241;
 
     off_ptr@[0] = 0;
     st_shut = bake_parse_style!(buf, off_ptr, 18);
@@ -696,7 +698,7 @@ fn test_end_to_end_vector_shutter!(arena) [
     ret 0;
 ]
 
-// Test 17: End-to-End bake_core! -> sagr_core! Multi-Tile Carry, Blend & Shutter
+// Test 17: End-to-End TRG bake_core! -> sagr_core! Multi-Tile Carry, Blend & Shutter
 fn test_end_to_end_bake_to_sagr_core!(arena) [
     surf = slsp_create!(arena, SLSP_CANVAS_WIDTH, SLSP_CANVAS_HEIGHT, SLSP_FORMAT_RGBA8);
     if (surf == 0) [
@@ -704,40 +706,49 @@ fn test_end_to_end_bake_to_sagr_core!(arena) [
     ]
     fb = surf.SLSP_WORD_FB_PTR;
     mask = surf.SLSP_WORD_MASK_PTR;
-    src_buf = arena_alloc_words!(arena, 16);
+    src_buf = arena_alloc_words!(arena, 32);
     stape_out = arena_alloc_words!(arena, 512);
 
-    // 1. "rect: 16 16 48 32 #00FF00FF\n" (28 bytes)
-    src_buf@[0 * 1] = 114;
-    src_buf@[1 * 1] = 101;
-    src_buf@[2 * 1] = 99;
-    src_buf@[3 * 1] = 116;
-    src_buf@[4 * 1] = 58;
-    src_buf@[5 * 1] = 32;
-    src_buf@[6 * 1] = 49;
-    src_buf@[7 * 1] = 54;
-    src_buf@[8 * 1] = 32;
-    src_buf@[9 * 1] = 49;
-    src_buf@[10 * 1] = 54;
-    src_buf@[11 * 1] = 32;
-    src_buf@[12 * 1] = 52;
-    src_buf@[13 * 1] = 56;
-    src_buf@[14 * 1] = 32;
-    src_buf@[15 * 1] = 51;
-    src_buf@[16 * 1] = 50;
-    src_buf@[17 * 1] = 32;
-    src_buf@[18 * 1] = 35;
-    src_buf@[19 * 1] = 48;
-    src_buf@[20 * 1] = 48;
-    src_buf@[21 * 1] = 70;
-    src_buf@[22 * 1] = 70;
-    src_buf@[23 * 1] = 48;
-    src_buf@[24 * 1] = 48;
-    src_buf@[25 * 1] = 70;
-    src_buf@[26 * 1] = 70;
-    src_buf@[27 * 1] = 10;
+    // TRG Header (64B): Length=28, ScriptA=1, Magic='T' (84)
+    loop (hi:8 = 0 .. 8) [
+        src_buf@[hi] = 0;
+    ]
+    sh_sa = 1 << 32;
+    sh_mg = TRG_MAGIC_BYTE << 56;
+    w0_base = sh_sa | sh_mg;
+    src_buf@[0] = w0_base | 28;
 
-    len1 = bake_core!(src_buf, 28, BAKE_KIND_TAPE, stape_out, arena);
+    // 1. TRG: "rect: 16 16 48 32 #00FF00FF\n" (28 bytes at +64)
+    src_buf@[64 * 1] = 43;
+    src_buf@[65 * 1] = 30;
+    src_buf@[66 * 1] = 28;
+    src_buf@[67 * 1] = 45;
+    src_buf@[68 * 1] = 251;
+    src_buf@[69 * 1] = 240;
+    src_buf@[70 * 1] = 53;
+    src_buf@[71 * 1] = 58;
+    src_buf@[72 * 1] = 240;
+    src_buf@[73 * 1] = 53;
+    src_buf@[74 * 1] = 58;
+    src_buf@[75 * 1] = 240;
+    src_buf@[76 * 1] = 56;
+    src_buf@[77 * 1] = 60;
+    src_buf@[78 * 1] = 240;
+    src_buf@[79 * 1] = 55;
+    src_buf@[80 * 1] = 54;
+    src_buf@[81 * 1] = 240;
+    src_buf@[82 * 1] = 127;
+    src_buf@[83 * 1] = 52;
+    src_buf@[84 * 1] = 52;
+    src_buf@[85 * 1] = 5;
+    src_buf@[86 * 1] = 5;
+    src_buf@[87 * 1] = 52;
+    src_buf@[88 * 1] = 52;
+    src_buf@[89 * 1] = 5;
+    src_buf@[90 * 1] = 5;
+    src_buf@[91 * 1] = 241;
+
+    len1 = bake_core!(src_buf, 92, BAKE_KIND_TAPE, stape_out, arena);
     if (len1 < 64) [
         ret 2;
     ]
@@ -769,20 +780,20 @@ fn test_end_to_end_bake_to_sagr_core!(arena) [
     ]
 
     // 2. Translucent blue rect (32, 16, 16, 16, #0000FF80) overlapping ONLY tile (2, 1) over green
-    src_buf@[6 * 1] = 51;
-    src_buf@[7 * 1] = 50;
-    src_buf@[12 * 1] = 49;
-    src_buf@[13 * 1] = 54;
-    src_buf@[15 * 1] = 49;
-    src_buf@[16 * 1] = 54;
-    src_buf@[21 * 1] = 48;
-    src_buf@[22 * 1] = 48;
-    src_buf@[23 * 1] = 70;
-    src_buf@[24 * 1] = 70;
-    src_buf@[25 * 1] = 56;
-    src_buf@[26 * 1] = 48;
+    src_buf@[70 * 1] = 55;
+    src_buf@[71 * 1] = 54;
+    src_buf@[76 * 1] = 53;
+    src_buf@[77 * 1] = 58;
+    src_buf@[79 * 1] = 53;
+    src_buf@[80 * 1] = 58;
+    src_buf@[85 * 1] = 52;
+    src_buf@[86 * 1] = 52;
+    src_buf@[87 * 1] = 5;
+    src_buf@[88 * 1] = 5;
+    src_buf@[89 * 1] = 60;
+    src_buf@[90 * 1] = 52;
 
-    len2 = bake_core!(src_buf, 28, BAKE_KIND_TAPE, stape_out, arena);
+    len2 = bake_core!(src_buf, 92, BAKE_KIND_TAPE, stape_out, arena);
     if (len2 < 64) [
         ret 7;
     ]
@@ -791,13 +802,11 @@ fn test_end_to_end_bake_to_sagr_core!(arena) [
         ret 8;
     ]
 
-    // Tile (1, 1) outside overlay stays opaque green
     w_e2 = fb@[we_idx];
     px_e2 = w_e2 & 4294967295;
     if (px_e2 != green) [
         ret 9;
     ]
-    // Tile (2, 1) pixel (32, 16): Source-Over #0000FF80 (B=128, A=128) on #00FF00FF -> G=127, B=128, A=255 = 4286611200
     w_i2 = fb@[wi_idx];
     px_i2 = w_i2 & 4294967295;
     if (px_i2 != 4286611200) [
@@ -806,55 +815,60 @@ fn test_end_to_end_bake_to_sagr_core!(arena) [
 
     // 3. Occluded pure green rect (32, 16, 16, 16) + foreground opaque red shutter (16, 16, 48, 32)
     tape_sh = arena_alloc_words!(arena, 32);
-    // Line 0: "rect: 32 16 16 16 #00FF00FF\n" (bytes 0..27 of src_buf, patch back to green)
-    src_buf@[21 * 1] = 70;
-    src_buf@[22 * 1] = 70;
-    src_buf@[23 * 1] = 48;
-    src_buf@[24 * 1] = 48;
-    src_buf@[25 * 1] = 70;
-    src_buf@[26 * 1] = 70;
-    loop (cp:28 = 0 .. 28) [
-        tape_sh@[cp * 1] = src_buf@[cp * 1];
+    loop (hi2:8 = 0 .. 8) [
+        tape_sh@[hi2] = 0;
     ]
-    // Line 1: "rect: 16 16 48 32 #FF0000FF shutter\n" (36 bytes at offset 28..63)
-    tape_sh@[28 * 1] = 114;
-    tape_sh@[29 * 1] = 101;
-    tape_sh@[30 * 1] = 99;
-    tape_sh@[31 * 1] = 116;
-    tape_sh@[32 * 1] = 58;
-    tape_sh@[33 * 1] = 32;
-    tape_sh@[34 * 1] = 49;
-    tape_sh@[35 * 1] = 54;
-    tape_sh@[36 * 1] = 32;
-    tape_sh@[37 * 1] = 49;
-    tape_sh@[38 * 1] = 54;
-    tape_sh@[39 * 1] = 32;
-    tape_sh@[40 * 1] = 52;
-    tape_sh@[41 * 1] = 56;
-    tape_sh@[42 * 1] = 32;
-    tape_sh@[43 * 1] = 51;
-    tape_sh@[44 * 1] = 50;
-    tape_sh@[45 * 1] = 32;
-    tape_sh@[46 * 1] = 35;
-    tape_sh@[47 * 1] = 70;
-    tape_sh@[48 * 1] = 70;
-    tape_sh@[49 * 1] = 48;
-    tape_sh@[50 * 1] = 48;
-    tape_sh@[51 * 1] = 48;
-    tape_sh@[52 * 1] = 48;
-    tape_sh@[53 * 1] = 70;
-    tape_sh@[54 * 1] = 70;
-    tape_sh@[55 * 1] = 32;
-    tape_sh@[56 * 1] = 115;
-    tape_sh@[57 * 1] = 104;
-    tape_sh@[58 * 1] = 117;
-    tape_sh@[59 * 1] = 116;
-    tape_sh@[60 * 1] = 116;
-    tape_sh@[61 * 1] = 101;
-    tape_sh@[62 * 1] = 114;
-    tape_sh@[63 * 1] = 10;
+    tape_sh@[0] = w0_base | 64;
+    src_buf@[85 * 1] = 5;
+    src_buf@[86 * 1] = 5;
+    src_buf@[87 * 1] = 52;
+    src_buf@[88 * 1] = 52;
+    src_buf@[89 * 1] = 5;
+    src_buf@[90 * 1] = 5;
+    loop (cp:28 = 0 .. 28) [
+        dst_off = 64 + cp;
+        src_off = 64 + cp;
+        tape_sh@[dst_off * 1] = src_buf@[src_off * 1];
+    ]
+    // Line 1 TRG: "rect: 16 16 48 32 #FF0000FF shutter\n" (36 bytes at +92..+127)
+    tape_sh@[92 * 1] = 43;
+    tape_sh@[93 * 1] = 30;
+    tape_sh@[94 * 1] = 28;
+    tape_sh@[95 * 1] = 45;
+    tape_sh@[96 * 1] = 251;
+    tape_sh@[97 * 1] = 240;
+    tape_sh@[98 * 1] = 53;
+    tape_sh@[99 * 1] = 58;
+    tape_sh@[100 * 1] = 240;
+    tape_sh@[101 * 1] = 53;
+    tape_sh@[102 * 1] = 58;
+    tape_sh@[103 * 1] = 240;
+    tape_sh@[104 * 1] = 56;
+    tape_sh@[105 * 1] = 60;
+    tape_sh@[106 * 1] = 240;
+    tape_sh@[107 * 1] = 55;
+    tape_sh@[108 * 1] = 54;
+    tape_sh@[109 * 1] = 240;
+    tape_sh@[110 * 1] = 127;
+    tape_sh@[111 * 1] = 5;
+    tape_sh@[112 * 1] = 5;
+    tape_sh@[113 * 1] = 52;
+    tape_sh@[114 * 1] = 52;
+    tape_sh@[115 * 1] = 52;
+    tape_sh@[116 * 1] = 52;
+    tape_sh@[117 * 1] = 5;
+    tape_sh@[118 * 1] = 5;
+    tape_sh@[119 * 1] = 240;
+    tape_sh@[120 * 1] = 44;
+    tape_sh@[121 * 1] = 33;
+    tape_sh@[122 * 1] = 46;
+    tape_sh@[123 * 1] = 45;
+    tape_sh@[124 * 1] = 45;
+    tape_sh@[125 * 1] = 30;
+    tape_sh@[126 * 1] = 43;
+    tape_sh@[127 * 1] = 241;
 
-    len3 = bake_core!(tape_sh, 64, BAKE_KIND_TAPE, stape_out, arena);
+    len3 = bake_core!(tape_sh, 128, BAKE_KIND_TAPE, stape_out, arena);
     if (len3 < 64) [
         ret 11;
     ]
@@ -862,7 +876,6 @@ fn test_end_to_end_bake_to_sagr_core!(arena) [
     if (rc3 != 0) [
         ret 12;
     ]
-    // Both tile (1, 1) and tile (2, 1) must now be solid red #FF0000FF (4278190335)
     red = 4278190335;
     w_e3 = fb@[we_idx];
     px_e3 = w_e3 & 4294967295;
@@ -874,6 +887,99 @@ fn test_end_to_end_bake_to_sagr_core!(arena) [
     if (px_i3 != red) [
         ret 14;
     ]
+    ret 0;
+]
+
+// Test 18: TRG Container Validation + Byte-0 ('A') Palette + Hindi MSDF Independence
+fn test_end_to_end_bake_trg_to_msdf!(arena) [
+    src_buf = arena_alloc_words!(arena, 32);
+    out_buf = arena_alloc_words!(arena, 256);
+    pos_out = arena_alloc_words!(arena, 64);
+
+    loop (hi:8 = 0 .. 8) [
+        src_buf@[hi] = 0;
+    ]
+    sh_sa = 1 << 32;
+    sh_mg = TRG_MAGIC_BYTE << 56;
+    w0_base = sh_sa | sh_mg;
+
+    // 1. Raw empty (0B) and wrapped empty TRG (64B, len=0) both return 2
+    if (bake_core!(src_buf, 0, BAKE_KIND_TILE, out_buf, arena) != 2) [ ret 1; ]
+    src_buf@[0] = w0_base;
+    if (bake_core!(src_buf, 64, BAKE_KIND_TILE, out_buf, arena) != 2) [ ret 2; ]
+    if (bake_core!(src_buf, 64, BAKE_KIND_TAPE, out_buf, arena) != 2) [ ret 3; ]
+
+    // 2. Truncated header (32B), bad magic, non-English script, truncated payload return 3
+    if (bake_core!(src_buf, 32, BAKE_KIND_TILE, out_buf, arena) != 3) [ ret 4; ]
+    src_buf@[0] = w0_base | 4;
+    src_buf@[7 * 1] = 0;
+    if (bake_core!(src_buf, 68, BAKE_KIND_TILE, out_buf, arena) != 3) [ ret 5; ]
+    src_buf@[7 * 1] = TRG_MAGIC_BYTE;
+    src_buf@[4 * 1] = 3; // Hindi ScriptA=3
+    src_buf@[64 * 1] = 90;
+    if (bake_core!(src_buf, 68, BAKE_KIND_TILE, out_buf, arena) != 3) [ ret 6; ]
+    // Verify Hindi TRG renders fine directly in SAGR core msdf_layout_trg_line!
+    hn = msdf_layout_trg_line!(src_buf, 0, 0, 256, pos_out, 16);
+    if (hn != 4) [ ret 7; ]
+    if (pos_out@[0] != 858) [ ret 8; ]
+
+    src_buf@[4 * 1] = 1;
+    src_buf@[0] = w0_base | 20;
+    if (bake_core!(src_buf, 70, BAKE_KIND_TAPE, out_buf, arena) != 3) [ ret 9; ]
+
+    // 3. Valid TRG .tile using byte 0 ('A') as palette & row glyph:
+    // "size: 16 16\npal: A #FF0000FF\nrow: AAAAAAAAAAAAAAAA\n" (51 bytes at +64..+114)
+    src_buf@[0] = w0_base | 51;
+    // "size: 16 16\n" (12B: +64..+75)
+    src_buf@[64 * 1] = 44;
+    src_buf@[65 * 1] = 34;
+    src_buf@[66 * 1] = 51;
+    src_buf@[67 * 1] = 30;
+    src_buf@[68 * 1] = 251;
+    src_buf@[69 * 1] = 240;
+    src_buf@[70 * 1] = 53;
+    src_buf@[71 * 1] = 58;
+    src_buf@[72 * 1] = 240;
+    src_buf@[73 * 1] = 53;
+    src_buf@[74 * 1] = 58;
+    src_buf@[75 * 1] = 241;
+    // "pal: A #FF0000FF\n" (17B: +76..+92; 'A' = 0!)
+    src_buf@[76 * 1] = 41;
+    src_buf@[77 * 1] = 26;
+    src_buf@[78 * 1] = 37;
+    src_buf@[79 * 1] = 251;
+    src_buf@[80 * 1] = 240;
+    src_buf@[81 * 1] = 0;
+    src_buf@[82 * 1] = 240;
+    src_buf@[83 * 1] = 127;
+    src_buf@[84 * 1] = 5;
+    src_buf@[85 * 1] = 5;
+    src_buf@[86 * 1] = 52;
+    src_buf@[87 * 1] = 52;
+    src_buf@[88 * 1] = 52;
+    src_buf@[89 * 1] = 52;
+    src_buf@[90 * 1] = 5;
+    src_buf@[91 * 1] = 5;
+    src_buf@[92 * 1] = 241;
+    // "row: AAAAAAAAAAAAAAAA\n" (22B: +93..+114)
+    src_buf@[93 * 1] = 43;
+    src_buf@[94 * 1] = 40;
+    src_buf@[95 * 1] = 48;
+    src_buf@[96 * 1] = 251;
+    src_buf@[97 * 1] = 240;
+    loop (ra:16 = 0 .. 16) [
+        rpos = 98 + ra;
+        src_buf@[rpos * 1] = 0;
+    ]
+    src_buf@[114 * 1] = 241;
+
+    tlen = bake_core!(src_buf, 115, BAKE_KIND_TILE, out_buf, arena);
+    if (tlen != 1088) [ ret 10; ]
+    tile0 = stile_get_tile_ptr(out_buf, 0);
+    w_px = tile0@[0];
+    px0 = w_px & 4294967295;
+    if (px0 != 4278190335) [ ret 11; ]
+
     ret 0;
 ]
 
@@ -949,10 +1055,14 @@ fn main!() [
     r16 = test_end_to_end_vector_shutter!(arena);
     if (r16 != 0) [ sys_exit!(116); ]
 
-    // Test 17: End-to-End bake_core! -> sagr_core! Multi-Tile Carry & Blend
+    // Test 17: End-to-End TRG bake_core! -> sagr_core! Multi-Tile Carry & Blend
     r17 = test_end_to_end_bake_to_sagr_core!(arena);
     if (r17 != 0) [ sys_exit!(117); ]
 
-    // All 17 tests passed!
+    // Test 18: TRG Container Validation + Byte-0 ('A') Palette + Hindi MSDF Independence
+    r18 = test_end_to_end_bake_trg_to_msdf!(arena);
+    if (r18 != 0) [ sys_exit!(118); ]
+
+    // All 18 tests passed!
     sys_exit!(0);
 ]

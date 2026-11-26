@@ -7,11 +7,19 @@ fn bake_core!(src_buf, src_len, kind, out_buf, arena) [
     if (kind == BAKE_KIND_PPM) [
         ret bake_ppm_core!(src_buf, src_len, out_buf, arena);
     ]
+    if (kind < BAKE_KIND_TILE) [
+        ret 1;
+    ]
+    if (kind > BAKE_KIND_TAPE) [
+        ret 1;
+    ]
+    trg_len = bake_trg_payload_len(src_buf, src_len);
+    if (trg_len < 0) [
+        err = 0 - trg_len;
+        ret err;
+    ]
     if (kind == BAKE_KIND_TILE) [
-        ret bake_tile_core!(src_buf, src_len, out_buf, arena);
+        ret bake_tile_core!(src_buf, trg_len, out_buf, arena);
     ]
-    if (kind == BAKE_KIND_TAPE) [
-        ret bake_tape_core!(src_buf, src_len, out_buf, arena);
-    ]
-    ret 1;
+    ret bake_tape_core!(src_buf, trg_len, out_buf, arena);
 ]

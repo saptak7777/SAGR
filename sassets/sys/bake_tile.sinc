@@ -5,12 +5,10 @@
 // Zero Libc, Zero Floating Point, Zero Division
 // ==========================================
 
-fn bake_tile_core!(in_buf, bytes_read, out_buf, arena) [
-    if (bytes_read < 1) [
-        ret 2;
-    ]
+fn bake_tile_core!(in_buf, trg_len, out_buf, arena) [
+    scan_end = TRG_PAYLOAD_OFFSET + trg_len;
     off_scratch = arena_alloc_words!(arena, 2);
-    off_scratch@[0] = 0;
+    off_scratch@[0] = TRG_PAYLOAD_OFFSET;
 
     // Allocate 256-word palette table (initialized to #00000000)
     pal_table = arena_alloc_words!(arena, 256);
@@ -31,19 +29,19 @@ fn bake_tile_core!(in_buf, bytes_read, out_buf, arena) [
     loop (line_idx:4096 = 0 .. 4096) [
         if (parse_active == 1) [
             off = off_scratch@[0];
-            in_b = off < bytes_read;
+            in_b = off < scan_end;
             if (in_b == 0) [
                 parse_active = 0;
             ]
             if (parse_active == 1) [
                 ch = in_buf@[off * 1];
 
-                // 1. "size: W H" (ch == 115 's')
-                if (ch == 115) [
+                // 1. "size: W H" (TRG 's' = 44)
+                if (ch == 44) [
                     off5 = off + 5;
                     off_scratch@[0] = off5;
-                    img_w = bake_parse_int!(in_buf, off_scratch, bytes_read);
-                    img_h = bake_parse_int!(in_buf, off_scratch, bytes_read);
+                    img_w = bake_parse_int!(in_buf, off_scratch, scan_end, 52);
+                    img_h = bake_parse_int!(in_buf, off_scratch, scan_end, 52);
 
                     // Branchless ceiling: (img_w + 15) >> 4
                     w_pad = img_w + 15;
@@ -59,25 +57,25 @@ fn bake_tile_core!(in_buf, bytes_read, out_buf, arena) [
                     ]
                 ]
 
-                // 2. "pal: <char> <#RRGGBBAA>" (ch == 112 'p')
-                if (ch == 112) [
+                // 2. "pal: <char> <#RRGGBBAA>" (TRG 'p' = 41)
+                if (ch == 41) [
                     off4 = off + 4;
                     off_scratch@[0] = off4;
-                    off_p = bake_skip_ws!(in_buf, off_scratch, bytes_read);
+                    off_p = bake_skip_ws!(in_buf, off_scratch, scan_end);
                     pal_char = in_buf@[off_p * 1];
                     off_p = off_p + 1;
                     off_scratch@[0] = off_p;
-                    pal_rgba = bake_parse_hex_u32!(in_buf, off_scratch, bytes_read);
+                    pal_rgba = bake_parse_hex_u32!(in_buf, off_scratch, scan_end);
 
                     char_idx = pal_char & 255;
                     pal_table@[char_idx] = pal_rgba;
                 ]
 
-                // 3. "row: <chars...>" (ch == 114 'r')
-                if (ch == 114) [
+                // 3. "row: <chars...>" (TRG 'r' = 43)
+                if (ch == 43) [
                     off4 = off + 4;
                     off_scratch@[0] = off4;
-                    off_r = bake_skip_ws!(in_buf, off_scratch, bytes_read);
+                    off_r = bake_skip_ws!(in_buf, off_scratch, scan_end);
 
                     if (payload_buf != 0) [
                         ty = cur_row_y >> 4;
@@ -117,7 +115,7 @@ fn bake_tile_core!(in_buf, bytes_read, out_buf, arena) [
                     off_scratch@[0] = off_r;
                 ]
 
-                bake_skip_to_nl!(in_buf, off_scratch, bytes_read);
+                bake_skip_to_nl!(in_buf, off_scratch, scan_end);
             ]
         ]
     ]

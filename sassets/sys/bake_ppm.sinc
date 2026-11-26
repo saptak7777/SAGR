@@ -50,9 +50,9 @@ fn bake_ppm_core!(in_buf, bytes_read, out_buf, arena) [
 
     off_scratch@[0] = 2;
 
-    width = bake_parse_int!(in_buf, off_scratch, bytes_read);
-    height = bake_parse_int!(in_buf, off_scratch, bytes_read);
-    maxval = bake_parse_int!(in_buf, off_scratch, bytes_read);
+    width = bake_parse_int!(in_buf, off_scratch, bytes_read, 48);
+    height = bake_parse_int!(in_buf, off_scratch, bytes_read, 48);
+    maxval = bake_parse_int!(in_buf, off_scratch, bytes_read, 48);
 
     // Consume trailing single whitespace char after maxval
     off = off_scratch@[0];

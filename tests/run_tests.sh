@@ -656,6 +656,7 @@ cat steel/sys/sys.sinc \
     sagr/pure/flattener.sinc \
     sagr/pure/heddle.sinc \
     sagr/pure/loom.sinc \
+    sagr/pure/msdf.sinc \
     sagr/sys/slsp.sinc \
     sagr/sys/entry.sinc \
     sassets/data/asset_defs.sinc \
@@ -700,7 +701,8 @@ ASSET_TEST_NAMES=(
     "Test 14: Sovereign In-Memory Asset Compiler Invalid Kind Rejection (ret 1)"
     "Test 15: End-to-end .stile opaque beam flush & translucent composite"
     "Test 16: End-to-end .stape shutter reap occlusion & backdrop weave"
-    "Test 17: End-to-end bake_core! -> sagr_core! multi-tile carry & alpha blend"
+    "Test 17: End-to-end TRG bake_core! -> sagr_core! multi-tile carry & alpha blend"
+    "Test 18: TRG container validation, byte-0 ('A') palette & Hindi MSDF"
 )
 
 set +e
@@ -724,18 +726,18 @@ fi
 
 echo ""
 echo "=================================================================="
-echo "  RESULT: ALL 17/17 SOVEREIGN ASSET TESTS PASSED BIT-PERFECT (EXIT 0)"
+echo "  RESULT: ALL 18/18 SOVEREIGN ASSET TESTS PASSED BIT-PERFECT (EXIT 0)"
 echo "=================================================================="
 
-# 5. Sovereign Asset Compiler Verification (bin/sagr-bake built via sassets/build.staff)
+# 5. Sovereign Asset Compiler Verification (bin/sagr-bake.elf + bin/trg_encode + bin/sagr-bake wrapper)
 echo ""
-echo "--- Building Pure SINC Asset Compiler via staff (bin/sagr-bake) ---"
+echo "--- Building Pure SINC Asset Compiler via staff (bin/sagr-bake.elf) ---"
 printf "[BUILD] Compiling sassets package via staff... "
 ./bin/staff sassets/build.staff scratch/sagr_bake.safe
 echo "OK"
-printf "[BUILD] Packaging standalone ELF via packager_bin... "
-./bin/packager_bin scratch/sagr_bake.safe ./bin/sagr-bake
-chmod +x ./bin/sagr-bake
+printf "[BUILD] Packaging standalone ELF via packager_bin (bin/sagr-bake.elf)... "
+./bin/packager_bin scratch/sagr_bake.safe ./bin/sagr-bake.elf
+chmod +x ./bin/sagr-bake.elf
 echo "OK"
 
 echo ""
@@ -873,9 +875,11 @@ if [ -f "./bin/sagr-bake" ]; then
     fi
 
     printf "[CHECK] Verifying .stile compilation (PPM -> .stile)... "
-    ./bin/sagr-bake scratch/battle_game_assets/tileset_dungeon.ppm scratch/dungeon_sinc_test.stile > /dev/null 2>&1
-    SIZE_STILE=$(wc -c < scratch/dungeon_sinc_test.stile)
-    if [ "$SIZE_STILE" -eq 1441856 ]; then
+    printf 'P6\n32 32\n255\n' > scratch/cli_test.ppm
+    dd if=/dev/zero bs=3072 count=1 >> scratch/cli_test.ppm 2>/dev/null
+    ./bin/sagr-bake scratch/cli_test.ppm scratch/cli_ppm_test.stile > /dev/null 2>&1
+    SIZE_STILE=$(wc -c < scratch/cli_ppm_test.stile)
+    if [ "$SIZE_STILE" -eq 4160 ]; then
         echo "OK ($SIZE_STILE bytes exact)"
     else
         echo "FAIL (Unexpected size: $SIZE_STILE)"
@@ -883,7 +887,31 @@ if [ -f "./bin/sagr-bake" ]; then
     fi
 
     printf "[CHECK] Verifying .tile compilation (Human-Readable .tile -> .stile RGBA)... "
-    ./bin/sagr-bake scratch/hero.tile scratch/hero_sinc_test.stile > /dev/null 2>&1
+    cat << 'EOF' > scratch/cli_hero.tile
+# cli_hero.tile - 16x16 RGBA Sprite
+size: 16 16
+pal: . #00000000
+pal: # #FF0000FF
+pal: s #0000FF80
+pal: w #FFFFFFFF
+row: ......####......
+row: ....########....
+row: ...##w####w##...
+row: ...##w####w##...
+row: ....########....
+row: .....######.....
+row: ....ssssssss....
+row: ...ssssssssss...
+row: ..ssssssssssss..
+row: ..ssssssssssss..
+row: ...ss......ss...
+row: ...ss......ss...
+row: ...##......##...
+row: ..####....####..
+row: .######..######.
+row: ................
+EOF
+    ./bin/sagr-bake scratch/cli_hero.tile scratch/hero_sinc_test.stile > /dev/null 2>&1
     SIZE_HERO=$(wc -c < scratch/hero_sinc_test.stile)
     if [ "$SIZE_HERO" -eq 1088 ]; then
         echo "OK ($SIZE_HERO bytes exact)"
@@ -893,7 +921,14 @@ if [ -f "./bin/sagr-bake" ]; then
     fi
 
     printf "[CHECK] Verifying .stape compilation (TAPE -> .stape)... "
-    ./bin/sagr-bake scratch/test_shutter.tape scratch/tape_sinc_test.stape > /dev/null 2>&1
+    cat << 'EOF' > scratch/cli_shutter.tape
+bounds: 0 0 1920 1080
+rect: 100 100 400 300 #FF0000FF pure
+rect: 200 150 200 150 #00FF00FF shutter
+line: 50 50 500 500 #0000FFFF pure
+line: 100 200 300 400 #FFFF00FF shutter
+EOF
+    ./bin/sagr-bake scratch/cli_shutter.tape scratch/tape_sinc_test.stape > /dev/null 2>&1
     SIZE_STAPE=$(wc -c < scratch/tape_sinc_test.stape)
     if [ "$SIZE_STAPE" -eq 256 ]; then
         echo "OK ($SIZE_STAPE bytes exact)"
@@ -903,12 +938,47 @@ if [ -f "./bin/sagr-bake" ]; then
     fi
 
     printf "[CHECK] Verifying Bézier .tape compilation (.tape -> .stape with Wang Quads)... "
-    ./bin/sagr-bake scratch/curve.tape scratch/curve_sinc_test.stape > /dev/null 2>&1
+    cat << 'EOF' > scratch/cli_curve.tape
+# cli_curve.tape - Vector with Bezier Curves
+bounds: 0 0 500 500
+rect: 10 10 80 80 #202020FF shutter
+line: 10 10 90 90 #FFFFFFFF pure
+quad: 20 50 50 10 80 50 #FFCC00FF pure
+quad: 80 50 50 90 20 50 #00FFCCFF shutter
+EOF
+    ./bin/sagr-bake scratch/cli_curve.tape scratch/curve_sinc_test.stape > /dev/null 2>&1
     SIZE_CURVE=$(wc -c < scratch/curve_sinc_test.stape)
     if [ "$SIZE_CURVE" -eq 1184 ]; then
         echo "OK ($SIZE_CURVE bytes exact)"
     else
         echo "FAIL (Unexpected size: $SIZE_CURVE)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying direct TRG-native pipeline (bin/trg_encode -> bin/sagr-bake.elf)... "
+    ./bin/trg_encode scratch/cli_curve.tape scratch/cli_curve.tape.trg
+    ./bin/sagr-bake.elf scratch/cli_curve.tape.trg scratch/curve_elf_test.stape > /dev/null 2>&1
+    SIZE_ELF_CURVE=$(wc -c < scratch/curve_elf_test.stape)
+    cp scratch/cli_curve.tape scratch/bad_ascii.tape.trg
+    set +e
+    ./bin/sagr-bake.elf scratch/bad_ascii.tape.trg scratch/out.stape > /dev/null 2>&1
+    BAD_TRG_EXIT=$?
+    set -e
+    if [ "$SIZE_ELF_CURVE" -eq 1184 ] && [ "$BAD_TRG_EXIT" -eq 3 ]; then
+        echo "OK ($SIZE_ELF_CURVE bytes direct, non-TRG exit 3)"
+    else
+        echo "FAIL (size=$SIZE_ELF_CURVE bad_trg_exit=$BAD_TRG_EXIT)"
+        exit 1
+    fi
+
+    printf "[CHECK] Verifying external text TRG encoding (SINC bin/trg_encode .txt -> .trg)... "
+    printf "Hello SAGR 123\n" > scratch/cli_trg.txt
+    ./bin/trg_encode scratch/cli_trg.txt scratch/cli_trg.trg
+    SIZE_TRG=$(wc -c < scratch/cli_trg.trg)
+    if [ "$SIZE_TRG" -eq 79 ]; then
+        echo "OK ($SIZE_TRG bytes exact)"
+    else
+        echo "FAIL (Unexpected size: $SIZE_TRG)"
         exit 1
     fi
 fi
@@ -925,9 +995,9 @@ echo "  Phase 5 (Heddle Backdrop & Shutter):       12/12 PASSED"
 echo "  Phase 6 (MSDF Typography):                 12/12 PASSED"
 echo "  Phase 7 (Deterministic Golden Oracle):     11/11 PASSED"
 echo "  Standalone Cross-Tile Regression:           1/1  PASSED"
-echo "  Sovereign Assets (.stile & .stape):        17/17 PASSED"
+echo "  Sovereign Assets (.stile, .stape, .trg):   18/18 PASSED"
 echo "=================================================================="
-echo "  TOTAL TESTS PASSED:                       101/101 BIT-PERFECT"
+echo "  TOTAL TESTS PASSED:                       102/102 BIT-PERFECT"
 echo "  CORE ENGINE STATUS: 100% CLEAN & VERIFIED (EXIT 0)"
 echo "=================================================================="
 

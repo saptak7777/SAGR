@@ -21,6 +21,8 @@ test_*_bin
 !bin/packager_bin
 !bin/packager_o
 !bin/slim.elf
+!bin/sagr-bake.elf
+!bin/trg_encode
 
 # Scratch, Cache & Build Directories
 scratch/

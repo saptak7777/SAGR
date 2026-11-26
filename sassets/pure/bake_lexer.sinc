@@ -1,8 +1,37 @@
 // ==========================================
 // sassets/pure/bake_lexer.sinc
-// SAGR Sovereign Asset Compiler Shared Lexer
+// SAGR Sovereign Asset Compiler Shared Lexer (TRG-Native + PPM Header Ints)
 // Zero Libc, Zero Floating Point, Zero Division Premultiplication
 // ==========================================
+
+fn bake_trg_payload_len(in_buf, bytes_read) [
+    err2 = 0 - 2;
+    if (bytes_read < 1) [
+        ret err2;
+    ]
+    err3 = 0 - 3;
+    if (bytes_read < 64) [
+        ret err3;
+    ]
+    magic = in_buf@[7 * 1];
+    if (magic != TRG_MAGIC_BYTE) [
+        ret err3;
+    ]
+    sa = in_buf@[4 * 1];
+    if (sa != 1) [
+        ret err3;
+    ]
+    raw_w0 = in_buf@[0];
+    trg_len = raw_w0 & 4294967295;
+    if (trg_len < 1) [
+        ret err2;
+    ]
+    need = TRG_PAYLOAD_OFFSET + trg_len;
+    if (bytes_read < need) [
+        ret err3;
+    ]
+    ret trg_len;
+]
 
 fn bake_premult_ch(c_val, a_val) [
     prod = c_val * a_val;
@@ -14,28 +43,23 @@ fn bake_premult_ch(c_val, a_val) [
 ]
 
 fn bake_hex_nibble(ch) [
-    is_d_lo = ch > 47;
-    is_d_hi = ch < 58;
-    is_digit = is_d_lo & is_d_hi;
-    if (is_digit == 1) [
-        diff = ch - 48;
-        ret diff;
+    if (ch < 6) [
+        res_u = ch + 10;
+        ret res_u;
     ]
-    is_u_lo = ch > 64;
-    is_u_hi = ch < 71;
-    is_upper = is_u_lo & is_u_hi;
-    if (is_upper == 1) [
-        diff = ch - 65;
-        res = diff + 10;
-        ret res;
-    ]
-    is_l_lo = ch > 96;
-    is_l_hi = ch < 103;
+    is_l_lo = ch > 25;
+    is_l_hi = ch < 32;
     is_lower = is_l_lo & is_l_hi;
     if (is_lower == 1) [
-        diff = ch - 97;
-        res = diff + 10;
-        ret res;
+        res_l = ch - 16;
+        ret res_l;
+    ]
+    is_d_lo = ch > 51;
+    is_d_hi = ch < 62;
+    is_digit = is_d_lo & is_d_hi;
+    if (is_digit == 1) [
+        diff = ch - 52;
+        ret diff;
     ]
     ret 0;
 ]
@@ -51,8 +75,8 @@ fn bake_skip_ws!(buf, off_ptr, max_bytes) [
             ]
             if (ws_active == 1) [
                 b = buf@[off * 1];
-                is_sp = b == 32;
-                is_tb = b == 9;
+                is_sp = b == 240;
+                is_tb = b == 242;
                 is_w = is_sp | is_tb;
                 if (is_w == 1) [
                     off = off + 1;
@@ -73,7 +97,7 @@ fn bake_parse_hex_u32!(buf, off_ptr, max_bytes) [
 
     if (off < max_bytes) [
         cb = buf@[off * 1];
-        if (cb == 35) [
+        if (cb == 127) [
             off = off + 1;
         ]
     ]
@@ -118,7 +142,7 @@ fn bake_parse_hex_u32!(buf, off_ptr, max_bytes) [
     ret res;
 ]
 
-fn bake_parse_int!(buf, off_ptr, max_bytes) [
+fn bake_parse_int!(buf, off_ptr, max_bytes, zero_ch) [
     off = off_ptr@[0];
     val = 0;
 
@@ -131,15 +155,10 @@ fn bake_parse_int!(buf, off_ptr, max_bytes) [
             ]
             if (ws_active == 1) [
                 b = buf@[off * 1];
-                is_sp = b == 32;
-                is_tb = b == 9;
-                is_cr = b == 13;
-                is_lf = b == 10;
-                is_cm = b == 44;
-                m1 = is_sp | is_tb;
-                m2 = is_cr | is_lf;
-                m3 = m1 | m2;
-                m_ws = m3 | is_cm;
+                m_ws = b > 239;
+                if (zero_ch == 48) [
+                    m_ws = b < 33;
+                ]
                 if (m_ws == 1) [
                     off = off + 1;
                 ]
@@ -150,6 +169,8 @@ fn bake_parse_int!(buf, off_ptr, max_bytes) [
         ]
     ]
 
+    dig_lo = zero_ch - 1;
+    dig_hi = zero_ch + 10;
     dig_active = 1;
     loop (dig:16 = 0 .. 16) [
         if (dig_active == 1) [
@@ -159,11 +180,11 @@ fn bake_parse_int!(buf, off_ptr, max_bytes) [
             ]
             if (dig_active == 1) [
                 b = buf@[off * 1];
-                is_ge = b > 47;
-                is_le = b < 58;
+                is_ge = b > dig_lo;
+                is_le = b < dig_hi;
                 is_d = is_ge & is_le;
                 if (is_d == 1) [
-                    d = b - 48;
+                    d = b - zero_ch;
                     prod = val * 10;
                     val = prod + d;
                     off = off + 1;
@@ -191,7 +212,7 @@ fn bake_skip_to_nl!(in_buf, off_ptr, max_bytes) [
             if (active == 1) [
                 b = in_buf@[off * 1];
                 off = off + 1;
-                if (b == 10) [
+                if (b == 241) [
                     active = 0;
                 ]
             ]
@@ -202,29 +223,6 @@ fn bake_skip_to_nl!(in_buf, off_ptr, max_bytes) [
 ]
 
 fn bake_parse_style!(in_buf, off_ptr, max_bytes) [
-    off = off_ptr@[0];
-    active = 1;
-    loop (step:100 = 0 .. 100) [
-        if (active == 1) [
-            in_b = off < max_bytes;
-            if (in_b == 0) [
-                active = 0;
-            ]
-            if (active == 1) [
-                b = in_buf@[off * 1];
-                if (b == 35) [
-                    active = 0;
-                ]
-                if (b == 10) [
-                    active = 0;
-                ]
-                if (active == 1) [
-                    off = off + 1;
-                ]
-            ]
-        ]
-    ]
-    off_ptr@[0] = off;
     rgba = bake_parse_hex_u32!(in_buf, off_ptr, max_bytes);
 
     off2 = off_ptr@[0];
@@ -238,11 +236,11 @@ fn bake_parse_style!(in_buf, off_ptr, max_bytes) [
             ]
             if (act2 == 1) [
                 eb = in_buf@[off2 * 1];
-                if (eb == 115) [
+                if (eb == 44) [
                     effect = BAKE_EFFECT_SHUTTER;
                     act2 = 0;
                 ]
-                if (eb == 10) [
+                if (eb == 241) [
                     act2 = 0;
                 ]
                 if (act2 == 1) [
@@ -255,8 +253,7 @@ fn bake_parse_style!(in_buf, off_ptr, max_bytes) [
 
     sh_op = 1 << 56;
     sh_eff = effect << 48;
-    lo_rgba = rgba & 4294967295;
     m_op = sh_op | sh_eff;
-    style_w0 = m_op | lo_rgba;
+    style_w0 = m_op | rgba;
     ret style_w0;
 ]

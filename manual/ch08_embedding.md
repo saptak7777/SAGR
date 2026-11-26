@@ -11,7 +11,7 @@ SAGR is straightforward to embed in operating system kernels, UEFI bootloaders, 
 * `sagr_core!(tape_buf, tape_bytes, surf_ptr, arena)`
   OS-neutral vector compositor: validates `.stape` header, reaps shutters, weaves cord groups with backdrop carry, fast-fills solid interiors, and composites partial/translucent tiles onto `surf_ptr` (returns `0` on success, `1..5` on error).
 * `bake_core!(src_buf, src_len, kind, out_buf, arena)`
-  OS-neutral in-memory baker (`BAKE_KIND_PPM=1`, `BAKE_KIND_TILE=2`, `BAKE_KIND_TAPE=3`): compiles RAM buffers into `.stile` or `.stape` at `out_buf` and returns total byte length (`>= 64`, or `1..4` on error).
+  OS-neutral in-memory baker (`BAKE_KIND_PPM=1` raw P6, `BAKE_KIND_TILE=2` `.tile.trg`, `BAKE_KIND_TAPE=3` `.tape.trg`): compiles RAM buffers into `.stile` or `.stape` at `out_buf` and returns total byte length (`>= 64`, or `1..4` on error).
 * **Bare `.safe` C Host Contract:** Jump to `base + hdr[3] + hdr[2]` (32-byte `.safe` header), pass arguments in `rcx, rdx, rbx, rsi[, rdi]`, and preserve SysV callee-saved registers (`%rbx`, `%r12`–`%r15`) across the call.
 
 ### Surface & Framebuffer (`sagr/sys/slsp.sinc`)
