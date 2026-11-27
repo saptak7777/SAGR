@@ -153,7 +153,7 @@ fn main!() [
     // 2. Weave and shade all 4x4 micro-tiles
     loop (ty:4 = 0 .. MWE_TILES_Y) [
         loop (tx:4 = 0 .. MWE_TILES_X) [
-            lm_weave_tile!(tape, total_cords, tx, ty, 0, warp_scratch, cov_scratch);
+            lm_weave_tile_backdrop!(tape, total_cords, tx, ty, 0, 0, 0, warp_scratch, cov_scratch);
             lm_shade_tile_rgba!(cov_scratch, col_emerald, col_navy, tile_words);
             slsp_beam_flush_tile!(fb_ptr, tx, ty, MWE_STRIDE, tile_words~);
         ]

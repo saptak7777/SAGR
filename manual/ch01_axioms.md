@@ -81,4 +81,4 @@ local_y = y_q8 & 4095;
 
 Because every arithmetic operation is integer addition, subtraction, bit-shift, and bitwise logic:
 * Output pixel values are **bit-for-bit identical** across all Intel, AMD, or emulator platforms.
-* Every release of SAGR is audited against the **12-Scene Golden Oracle** ([`sagr/sys/verify_sagr.sinc`](../sagr/sys/verify_sagr.sinc)), calculating 64-bit FNV-1a hashes of the rendered pixels to verify zero bit-drift.
+* Every release of SAGR is audited against the **12-Scene Golden Oracle** ([`verify/verify_sagr.sinc`](../verify/verify_sagr.sinc)), calculating 64-bit FNV-1a hashes of the rendered pixels to verify zero bit-drift.

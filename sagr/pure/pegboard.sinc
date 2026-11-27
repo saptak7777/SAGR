@@ -3,38 +3,21 @@
 // Path Ingestion, Y-Monotonic Splitter & Clipper
 // ==========================================
 
-fn pb_transform_x(x, y, m00, m01, tx) [
-    x_scaled = (x * m00) >> 16;
-    y_scaled = (y * m01) >> 16;
-    res = x_scaled + y_scaled + tx;
+fn pb_transform_axis(x, y, ma, mb, t) [
+    x_scaled = (x * ma) >> 16;
+    y_scaled = (y * mb) >> 16;
+    res = x_scaled + y_scaled + t;
     ret res;
 ]
 
-fn pb_transform_y(x, y, m10, m11, ty) [
-    x_scaled = (x * m10) >> 16;
-    y_scaled = (y * m11) >> 16;
-    res = x_scaled + y_scaled + ty;
-    ret res;
-]
-
-fn pb_clamp_x(x) [
-    if (x < 0) [
+fn pb_clamp_axis(val, max_val) [
+    if (val < 0) [
         ret 0;
     ]
-    if (x > 491520) [
-        ret 491520;
+    if (val > max_val) [
+        ret max_val;
     ]
-    ret x;
-]
-
-fn pb_clamp_y(y) [
-    if (y < 0) [
-        ret 0;
-    ]
-    if (y > 276480) [
-        ret 276480;
-    ]
-    ret y;
+    ret val;
 ]
 
 fn pb_emit_line_raw!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
@@ -56,7 +39,7 @@ fn pb_clip_line!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
     if (both_above == 1) [
         ret 0;
     ]
-    both_below = (y0 > 276480) & (y1 > 276480);
+    both_below = (y0 > PB_CANVAS_H) & (y1 > PB_CANVAS_H);
     if (both_below == 1) [
         ret 0;
     ]
@@ -81,27 +64,28 @@ fn pb_clip_line!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
         y1 = 0;
     ]
 
-    if ((y0 > 276480) & (y1 < 276481)) [
-        diff_y0_top = 276480 - y0;
+    top_lim = PB_CANVAS_H + 1;
+    if ((y0 > PB_CANVAS_H) & (y1 < top_lim)) [
+        diff_y0_top = PB_CANVAS_H - y0;
         step_prod0_top = diff_y0_top * dx;
         step_x0_top = step_prod0_top / dy;
         x0 = x0 + step_x0_top;
-        y0 = 276480;
+        y0 = PB_CANVAS_H;
     ]
-    if ((y1 > 276480) & (y0 < 276481)) [
-        diff_y1_top = 276480 - y1;
+    if ((y1 > PB_CANVAS_H) & (y0 < top_lim)) [
+        diff_y1_top = PB_CANVAS_H - y1;
         dx_rev1_top = x0 - x1;
         dy_rev1_top = y0 - y1;
         step_prod1_top = diff_y1_top * dx_rev1_top;
         step_x1_top = step_prod1_top / dy_rev1_top;
         x1 = x1 + step_x1_top;
-        y1 = 276480;
+        y1 = PB_CANVAS_H;
     ]
 
-    x0 = pb_clamp_x(x0);
-    x1 = pb_clamp_x(x1);
-    y0 = pb_clamp_y(y0);
-    y1 = pb_clamp_y(y1);
+    x0 = pb_clamp_axis(x0, PB_CANVAS_W);
+    x1 = pb_clamp_axis(x1, PB_CANVAS_W);
+    y0 = pb_clamp_axis(y0, PB_CANVAS_H);
+    y1 = pb_clamp_axis(y1, PB_CANVAS_H);
 
     if (y0 == y1) [
         ret 0;
@@ -112,12 +96,12 @@ fn pb_clip_line!(out_tape, out_idx_ptr, x0, y0, x1, y1, rgba) [
 ]
 
 fn pb_emit_quad_leaf!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba) [
-    x0 = pb_clamp_x(x0);
-    x1 = pb_clamp_x(x1);
-    x2 = pb_clamp_x(x2);
-    y0 = pb_clamp_y(y0);
-    y1 = pb_clamp_y(y1);
-    y2 = pb_clamp_y(y2);
+    x0 = pb_clamp_axis(x0, PB_CANVAS_W);
+    x1 = pb_clamp_axis(x1, PB_CANVAS_W);
+    x2 = pb_clamp_axis(x2, PB_CANVAS_W);
+    y0 = pb_clamp_axis(y0, PB_CANVAS_H);
+    y1 = pb_clamp_axis(y1, PB_CANVAS_H);
+    y2 = pb_clamp_axis(y2, PB_CANVAS_H);
 
     if (y0 == y2) [
         if (y0 == y1) [
@@ -144,8 +128,8 @@ fn pb_emit_quad!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba) [
     if ((both_above == 1) & (y2 < 0)) [
         ret 0;
     ]
-    both_below = (y0 > 276480) & (y1 > 276480);
-    if ((both_below == 1) & (y2 > 276480)) [
+    both_below = (y0 > PB_CANVAS_H) & (y1 > PB_CANVAS_H);
+    if ((both_below == 1) & (y2 > PB_CANVAS_H)) [
         ret 0;
     ]
 
@@ -261,8 +245,8 @@ fn pb_path_builder!(cmd_tape, cmd_count, out_tape, out_idx_ptr, mat, rgba) [
         if (op == 1) [
             rx = cmd_tape@[(cmd_off + 1)];
             ry = cmd_tape@[(cmd_off + 2)];
-            px = pb_transform_x(rx, ry, m00, m01, trans_x);
-            py = pb_transform_y(rx, ry, m10, m11, trans_y);
+            px = pb_transform_axis(rx, ry, m00, m01, trans_x);
+            py = pb_transform_axis(rx, ry, m10, m11, trans_y);
             ox = px;
             oy = py;
         ]
@@ -270,8 +254,8 @@ fn pb_path_builder!(cmd_tape, cmd_count, out_tape, out_idx_ptr, mat, rgba) [
         if (op == 2) [
             rx1 = cmd_tape@[(cmd_off + 1)];
             ry1 = cmd_tape@[(cmd_off + 2)];
-            nx = pb_transform_x(rx1, ry1, m00, m01, trans_x);
-            ny = pb_transform_y(rx1, ry1, m10, m11, trans_y);
+            nx = pb_transform_axis(rx1, ry1, m00, m01, trans_x);
+            ny = pb_transform_axis(rx1, ry1, m10, m11, trans_y);
             pb_clip_line!(out_tape, out_idx_ptr, px, py, nx, ny, rgba);
             px = nx;
             py = ny;
@@ -282,10 +266,10 @@ fn pb_path_builder!(cmd_tape, cmd_count, out_tape, out_idx_ptr, mat, rgba) [
             rcy = cmd_tape@[(cmd_off + 2)];
             rex = cmd_tape@[(cmd_off + 3)];
             rey = cmd_tape@[(cmd_off + 4)];
-            cx = pb_transform_x(rcx, rcy, m00, m01, trans_x);
-            cy = pb_transform_y(rcx, rcy, m10, m11, trans_y);
-            ex = pb_transform_x(rex, rey, m00, m01, trans_x);
-            ey = pb_transform_y(rex, rey, m10, m11, trans_y);
+            cx = pb_transform_axis(rcx, rcy, m00, m01, trans_x);
+            cy = pb_transform_axis(rcx, rcy, m10, m11, trans_y);
+            ex = pb_transform_axis(rex, rey, m00, m01, trans_x);
+            ey = pb_transform_axis(rex, rey, m10, m11, trans_y);
             pb_emit_quad!(out_tape, out_idx_ptr, px, py, cx, cy, ex, ey, rgba);
             px = ex;
             py = ey;

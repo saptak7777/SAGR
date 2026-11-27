@@ -162,7 +162,7 @@ fn test_geo_nyquist_moire_grid!(tape, scratch, cov) [
         fl_emit_cord_raw!(tape, idx_ptr, x1, 4096, x1, 0, 4294967295);
     ]
     cords_count = idx_ptr@[0];
-    lm_weave_tile!(tape, cords_count, 0, 0, 0, scratch, cov);
+    lm_weave_tile_backdrop!(tape, cords_count, 0, 0, 0, 0, 0, scratch, cov);
 
     // Audit every row: alternating 256 and 0
     loop (r:TILE_DIM = 0 .. TILE_DIM) [
@@ -340,7 +340,7 @@ fn test_cons_bowtie_winding!(tape, scratch, cov) [
     cords_count = idx_ptr@[0];
 
     // Non-zero winding
-    lm_weave_tile!(tape, cords_count, 0, 0, 0, scratch, cov);
+    lm_weave_tile_backdrop!(tape, cords_count, 0, 0, 0, 0, 0, scratch, cov);
     loop (r:TILE_DIM = 0 .. TILE_DIM) [
         last_col = (r * 16) + 15;
         term_idx = 256 + r;
@@ -349,7 +349,7 @@ fn test_cons_bowtie_winding!(tape, scratch, cov) [
     ]
 
     // Even-odd winding
-    lm_weave_tile!(tape, cords_count, 0, 0, 1, scratch, cov);
+    lm_weave_tile_backdrop!(tape, cords_count, 0, 0, 1, 0, 0, scratch, cov);
     loop (r:TILE_DIM = 0 .. TILE_DIM) [
         last_col = (r * 16) + 15;
         term_idx = 256 + r;
@@ -655,7 +655,7 @@ fn test_fuzz_prng_pipeline!(tape, scratch, cov) [
     if (cords_to_weave > 100) [
         cords_to_weave = 100;
     ]
-    lm_weave_tile!(tape, cords_to_weave, 5, 5, 0, scratch, cov);
+    lm_weave_tile_backdrop!(tape, cords_to_weave, 5, 5, 0, 0, 0, scratch, cov);
 
     loop (p:TILE_PIXELS = 0 .. TILE_PIXELS) [
         val = cov@[p];
@@ -698,7 +698,7 @@ fn test_fuzz_500_overlapping_shapes!(tape, scratch, cov) [
 
     cords_count = idx_ptr@[0];
     if (cords_count > 100) [ cords_count = 100; ]
-    lm_weave_tile!(tape, cords_count, 0, 0, 0, scratch, cov);
+    lm_weave_tile_backdrop!(tape, cords_count, 0, 0, 0, 0, 0, scratch, cov);
 
     loop (p:TILE_PIXELS = 0 .. TILE_PIXELS) [
         val = cov@[p];

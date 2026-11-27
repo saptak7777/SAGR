@@ -42,27 +42,27 @@ fn test_fl_lzcnt() [
 ]
 
 fn test_fl_octagonal_norm() [
-    n0 = fl_octagonal_norm(0, 0);
+    n0 = bo_octagonal_norm(0, 0);
     if (n0 != 0) [
         ret 1;
     ]
-    n_h = fl_octagonal_norm(100, 0);
+    n_h = bo_octagonal_norm(100, 0);
     if (n_h != 100) [
         ret 2;
     ]
-    n_v = fl_octagonal_norm(0, 200);
+    n_v = bo_octagonal_norm(0, 200);
     if (n_v != 200) [
         ret 3;
     ]
-    n_diag = fl_octagonal_norm(100, 100);
+    n_diag = bo_octagonal_norm(100, 100);
     if (n_diag != 150) [
         ret 4;
     ]
-    n_neg1 = fl_octagonal_norm(-100, 200);
+    n_neg1 = bo_octagonal_norm(-100, 200);
     if (n_neg1 != 250) [
         ret 5;
     ]
-    n_neg2 = fl_octagonal_norm(-300, -100);
+    n_neg2 = bo_octagonal_norm(-300, -100);
     if (n_neg2 != 350) [
         ret 6;
     ]

@@ -158,9 +158,9 @@ fn test_vf_scene12_cursor_blinking!(mask_ptr) [
 
     // Cursor touches exactly 2 dirty tiles! (Minimal update: < 0.05W thermal delta)
     if (dirty_count != 2) [ ret 1; ]
-    t1 = hd_test_tile(mask_ptr, 10, 20);
-    t2 = hd_test_tile(mask_ptr, 10, 21);
-    t3 = hd_test_tile(mask_ptr, 10, 22);
+    t1 = bo_test_tile(mask_ptr, 10, 20);
+    t2 = bo_test_tile(mask_ptr, 10, 21);
+    t3 = bo_test_tile(mask_ptr, 10, 22);
     if (t1 != 1) [ ret 2; ]
     if (t2 != 1) [ ret 3; ]
     if (t3 != 0) [ ret 4; ]

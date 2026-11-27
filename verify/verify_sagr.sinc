@@ -1,5 +1,5 @@
 // ==========================================
-// sagr/sys/verify_sagr.sinc
+// verify/verify_sagr.sinc
 // Assembly Audit, 12-Scene Golden Oracle & Telemetry Suite
 // ==========================================
 
@@ -27,7 +27,7 @@ fn vf_render_scene_1!(tape, tile_words) [
 
     cov_scratch = tape + 2048;
     warp_scratch = tape + 4096;
-    lm_weave_tile!(tape, 1, 0, 0, 0, warp_scratch, cov_scratch);
+    lm_weave_tile_backdrop!(tape, 1, 0, 0, 0, 0, 0, warp_scratch, cov_scratch);
     fg = 4278190335;
     bg = 0;
     lm_shade_tile_rgba!(cov_scratch, fg, bg, tile_words);
@@ -43,7 +43,7 @@ fn vf_render_scene_2!(tape, tile_words) [
     cords_count = idx_ptr@[0];
     cov_scratch = tape + 2048;
     warp_scratch = tape + 4096;
-    lm_weave_tile!(tape, cords_count, 0, 0, 0, warp_scratch, cov_scratch);
+    lm_weave_tile_backdrop!(tape, cords_count, 0, 0, 0, 0, 0, warp_scratch, cov_scratch);
     fg = 4294901760;
     bg = 0;
     lm_shade_tile_rgba!(cov_scratch, fg, bg, tile_words);
@@ -64,7 +64,7 @@ fn vf_render_scene_3!(tape, tile_words) [
 
     cov_scratch = tape + 2048;
     warp_scratch = tape + 4096;
-    lm_weave_tile!(tape, 2, 0, 0, 0, warp_scratch, cov_scratch);
+    lm_weave_tile_backdrop!(tape, 2, 0, 0, 0, 0, 0, warp_scratch, cov_scratch);
     fg = 4281488112;
     bg = 0;
     lm_shade_tile_rgba!(cov_scratch, fg, bg, tile_words);
@@ -81,8 +81,8 @@ fn vf_render_scene_4!(tile_words) [
     mat@[4] = 131072;
     mat@[5] = 500;
 
-    pt_x = pb_transform_x(100, 200, mat@[0], mat@[1], mat@[2]);
-    pt_y = pb_transform_y(100, 200, mat@[3], mat@[4], mat@[5]);
+    pt_x = pb_transform_axis(100, 200, mat@[0], mat@[1], mat@[2]);
+    pt_y = pb_transform_axis(100, 200, mat@[3], mat@[4], mat@[5]);
 
     // Pack into tile_words as signature
     tile_words@[0] = pt_x;
@@ -207,8 +207,8 @@ fn vf_render_scene_12!(mask_ptr) [
     loop (zi:SLSP_DIRTY_WORDS = 0 .. SLSP_DIRTY_WORDS) [
         mask_ptr@[zi] = 0;
     ]
-    hd_stamp_tile!(mask_ptr, 10, 20);
-    hd_stamp_tile!(mask_ptr, 10, 21);
+    bo_stamp_tile!(mask_ptr, 10, 20);
+    bo_stamp_tile!(mask_ptr, 10, 21);
     ret 0;
 ]
 

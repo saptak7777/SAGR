@@ -1,6 +1,6 @@
 // ==========================================
 // steel/sys/driver_sagr_linux.sinc
-// Standalone Linux CLI Driver for SAGR
+// Standalone Linux CLI Driver for SAGR (sagr/build.staff)
 // ==========================================
 
 fn main!() [
@@ -10,20 +10,34 @@ fn main!() [
     if (arena == 0) [
         sys_exit!(1);
     ]
-    tape_buf = arena_alloc_words!(arena, 16384);
-    mask_ptr = arena_alloc_words!(arena, SLSP_DIRTY_WORDS);
-    tile_words = arena_alloc_words!(arena, TILE_WORDS);
-    out_hashes = arena_alloc_words!(arena, 16);
-    if (out_hashes == 0) [
+    surf = slsp_create!(arena, SLSP_CANVAS_WIDTH, SLSP_CANVAS_HEIGHT, SLSP_FORMAT_RGBA8);
+    if (surf == 0) [
         sys_exit!(2);
     ]
-    vf_verify_golden_oracle!(tape_buf, mask_ptr, tile_words, out_hashes);
-    loop (i:VF_SCENES_COUNT = 0 .. VF_SCENES_COUNT) [
-        h = out_hashes@[i];
-        if (h == 0) [
-            sys_exit!(3);
-        ]
+    tape_buf = arena_alloc_words!(arena, 16);
+    if (tape_buf == 0) [
+        sys_exit!(2);
+    ]
+    mag_sh = BAKE_STAPE_MAGIC << 32;
+    tape_buf@[0] = mag_sh | 1;
+    loop (hi:7 = 1 .. 8) [
+        tape_buf@[hi] = 0;
+    ]
+    op_sh = 1 << 56;
+    span_sh = 119 << 32;
+    w0_a = op_sh | span_sh;
+    tape_buf@[8] = w0_a | 4278190335;
+    tape_buf@[9] = 0;
+    tape_buf@[10] = 4096;
+    tape_buf@[11] = 1;
+    rc = sagr_core!(tape_buf, 96, surf, arena);
+    if (rc != 0) [
+        sys_exit!(3);
+    ]
+    fb_ptr = surf.SLSP_WORD_FB_PTR;
+    px0 = fb_ptr@[0] & 4294967295;
+    if (px0 != 4278190335) [
+        sys_exit!(4);
     ]
     sys_exit!(0);
 ]
-

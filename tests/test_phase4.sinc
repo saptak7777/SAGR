@@ -157,7 +157,7 @@ fn test_lm_horizontal_sliver!(tape, scratch, cov) [
     tape@[6] = w2_1;
     tape@[7] = row_mask;
 
-    lm_weave_tile!(tape, tape_len, 0, 0, 0, scratch, cov);
+    lm_weave_tile_backdrop!(tape, tape_len, 0, 0, 0, 0, 0, scratch, cov);
 
     // Analytical expectation:
     // Pixel 0 coverage = 80 / 256 units
@@ -196,7 +196,7 @@ fn test_lm_vertical_sliver!(tape, scratch, cov) [
     tape@[6] = (256 << 32) | 50;
     tape@[7] = row_mask;
 
-    lm_weave_tile!(tape, tape_len, 0, 0, 0, scratch, cov);
+    lm_weave_tile_backdrop!(tape, tape_len, 0, 0, 0, 0, 0, scratch, cov);
 
     cov0 = cov@[0];
     // Exact analytical area = 100
@@ -228,7 +228,7 @@ fn test_lm_diagonal_triangle!(tape, scratch, cov) [
     tape@[6] = (256 << 32) | 0;
     tape@[7] = row_mask;
 
-    lm_weave_tile!(tape, tape_len, 0, 0, 0, scratch, cov);
+    lm_weave_tile_backdrop!(tape, tape_len, 0, 0, 0, 0, 0, scratch, cov);
 
     // Exact triangular area = 50% = 128
     cov0 = cov@[0];
@@ -282,7 +282,7 @@ fn test_lm_star_winding_gate!(tape, scratch, cov) [
     tape@[19] = row_mask;
 
     // 1. Non-Zero Weave
-    lm_weave_tile!(tape, 5, 0, 0, 0, scratch, cov);
+    lm_weave_tile_backdrop!(tape, 5, 0, 0, 0, 0, 0, scratch, cov);
     center_idx = (8 * 16) + 8;
     cov_nz = cov@[center_idx];
     if (cov_nz != 256) [
@@ -290,7 +290,7 @@ fn test_lm_star_winding_gate!(tape, scratch, cov) [
     ]
 
     // 2. Even-Odd Weave
-    lm_weave_tile!(tape, 5, 0, 0, 1, scratch, cov);
+    lm_weave_tile_backdrop!(tape, 5, 0, 0, 1, 0, 0, scratch, cov);
     cov_eo = cov@[center_idx];
     if (cov_eo != 0) [
         ret 2;
@@ -372,7 +372,7 @@ fn test_lm_torture_tiles!(tape, scratch, cov) [
         tape@[10] = (500 << 32) | 100;
         tape@[11] = row_mask;
 
-        lm_weave_tile!(tape, 3, 0, 0, 0, scratch, cov);
+        lm_weave_tile_backdrop!(tape, 3, 0, 0, 0, 0, 0, scratch, cov);
         // Verify no crash and bounds intact
         cov_val = cov@[128];
         if (cov_val > 256) [

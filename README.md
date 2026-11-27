@@ -197,7 +197,7 @@ fn main!() [
     // 5. Weave micro-tiles (16x16) and flush to framebuffer
     loop (ty:68 = 0 .. 68) [
         loop (tx:120 = 0 .. 120) [
-            lm_weave_tile!(tape, total_cords, tx, ty, 0, warp_scratch, cov_scratch);
+            lm_weave_tile_backdrop!(tape, total_cords, tx, ty, 0, 0, 0, warp_scratch, cov_scratch);
             lm_shade_tile_rgba!(cov_scratch, 4284803990, 4279505940, tile_words);
             slsp_beam_flush_tile!(fb_ptr, tx, ty, 7680, tile_words~);
         ]
@@ -240,7 +240,7 @@ SAGR/
 │   ├── ch07_memory.md         # Memory contracts & scratch buffers
 │   ├── ch08_embedding.md      # API reference & embedding guide
 │   └── ch09_assets.md         # Sovereign asset architecture (.stile & .stape)
-├── sagr/                      # Core SAGR Engine (1,951 LOC)
+├── sagr/                      # Core SAGR Engine (1,656 LOC)
 │   ├── data/
 │   │   ├── pegboard_defs.sinc # Canvas bounds, .stape magic, and TRG constants
 │   │   └── surface.sinc       # SLSP surface constants & format flags
@@ -253,8 +253,7 @@ SAGR/
 │   │   └── pegboard.sinc      # Coordinate quantizer & tile cord clipper
 │   └── sys/
 │       ├── entry.sinc         # Sovereign SPINE compositor core (sagr_core!)
-│       ├── slsp.sinc          # Linear surface descriptor, tile read & beam flush
-│       └── verify_sagr.sinc   # FNV-1a 64-bit hash engine & 12-scene golden oracle
+│       └── slsp.sinc          # Linear surface descriptor, tile read & beam flush
 ├── sassets/                   # Sovereign Asset Subsystem (OS-Neutral Core, 823 LOC)
 │   ├── build.staff            # Manifest for bin/sagr-bake.elf (artifact sassets)
 │   ├── data/
@@ -268,17 +267,20 @@ SAGR/
 │       ├── bake_tape.sinc     # TRG-native .tape.trg -> .stape core with Wang Quads
 │       ├── bake_tile.sinc     # TRG-native .tile.trg -> .stile RGBA core
 │       └── entry.sinc         # In-memory bake_core! SPINE dispatcher
-├── steel/                     # SINC Runtime & OS Platform Drivers (245 LOC)
+├── steel/                     # SINC Runtime & OS Platform Drivers (259 LOC)
 │   └── sys/
 │       ├── arena.sinc         # Linear bump allocator
 │       ├── driver_sagr_linux.sinc    # Standalone Linux harness for sagr/build.staff
 │       ├── driver_sassets_linux.sinc # Linux CLI driver for bin/sagr-bake.elf
 │       └── sys.sinc           # Raw Linux syscall interface (sys_mmap, sys_write)
-└── tests/                     # 102-Assertion Bit-Perfect Test Suite
-    ├── run_tests.sh           # Master test runner, Stage A audits & CLI verification
-    ├── test_assets.sinc       # 18-assertion sovereign asset verification suite
-    ├── test_phase1.sinc .. test_phase7.sinc # Subsystem test suites
-    └── test_failing_cross_tile_moire.sinc # Multi-tile backdrop tension regression test
+├── tests/                     # 102-Assertion Bit-Perfect Test Suite
+│   ├── run_tests.sh           # Master test runner, Stage A audits & CLI verification
+│   ├── test_assets.sinc       # 18-assertion sovereign asset verification suite
+│   ├── test_phase1.sinc .. test_phase7.sinc # Subsystem test suites
+│   └── test_failing_cross_tile_moire.sinc # Multi-tile backdrop tension regression test
+└── verify/                    # 12-Scene Golden Oracle & Telemetry Suite
+    ├── verify_sagr.sinc       # FNV-1a 64-bit hash engine & 12-scene golden oracle
+    └── verify.sh              # Standalone oracle verification runner
 ```
 
 ---

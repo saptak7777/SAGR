@@ -22,7 +22,7 @@ cat steel/sys/sys.sinc \
     sagr/pure/heddle.sinc \
     sagr/pure/msdf.sinc \
     sagr/sys/slsp.sinc \
-    sagr/sys/verify_sagr.sinc \
+    verify/verify_sagr.sinc \
     tests/test_phase7.sinc > scratch/verify_bundle.sinc
 
 ./bin/sinc.elf scratch/verify_bundle.sinc scratch/verify.safe

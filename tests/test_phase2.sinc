@@ -13,8 +13,8 @@ fn test_pb_affine_identity!(mat) [
 
     x = 12345;
     y = 67890;
-    tx = pb_transform_x(x, y, mat@[0], mat@[1], mat@[2]);
-    ty = pb_transform_y(x, y, mat@[3], mat@[4], mat@[5]);
+    tx = pb_transform_axis(x, y, mat@[0], mat@[1], mat@[2]);
+    ty = pb_transform_axis(x, y, mat@[3], mat@[4], mat@[5]);
 
     if (tx != 12345) [
         ret 1;
@@ -35,8 +35,8 @@ fn test_pb_affine_scale!(mat) [
 
     x = 1000;
     y = 2000;
-    tx = pb_transform_x(x, y, mat@[0], mat@[1], mat@[2]);
-    ty = pb_transform_y(x, y, mat@[3], mat@[4], mat@[5]);
+    tx = pb_transform_axis(x, y, mat@[0], mat@[1], mat@[2]);
+    ty = pb_transform_axis(x, y, mat@[3], mat@[4], mat@[5]);
 
     if (tx != 2000) [
         ret 1;
@@ -57,8 +57,8 @@ fn test_pb_affine_translate!(mat) [
 
     x = 1200;
     y = 3400;
-    tx = pb_transform_x(x, y, mat@[0], mat@[1], mat@[2]);
-    ty = pb_transform_y(x, y, mat@[3], mat@[4], mat@[5]);
+    tx = pb_transform_axis(x, y, mat@[0], mat@[1], mat@[2]);
+    ty = pb_transform_axis(x, y, mat@[3], mat@[4], mat@[5]);
 
     if (tx != 6200) [
         ret 1;
@@ -80,8 +80,8 @@ fn test_pb_affine_rotation!(mat) [
 
     x = 1000;
     y = 2500;
-    tx = pb_transform_x(x, y, mat@[0], mat@[1], mat@[2]);
-    ty = pb_transform_y(x, y, mat@[3], mat@[4], mat@[5]);
+    tx = pb_transform_axis(x, y, mat@[0], mat@[1], mat@[2]);
+    ty = pb_transform_axis(x, y, mat@[3], mat@[4], mat@[5]);
 
     if (tx != 2500) [
         ret 1;
@@ -93,28 +93,28 @@ fn test_pb_affine_rotation!(mat) [
 ]
 
 fn test_pb_clamping() [
-    cx_neg = pb_clamp_x(-500);
+    cx_neg = pb_clamp_axis(-500, PB_CANVAS_W);
     if (cx_neg != 0) [
         ret 1;
     ]
-    cx_high = pb_clamp_x(600000);
+    cx_high = pb_clamp_axis(600000, PB_CANVAS_W);
     if (cx_high != 491520) [
         ret 2;
     ]
-    cx_mid = pb_clamp_x(123456);
+    cx_mid = pb_clamp_axis(123456, PB_CANVAS_W);
     if (cx_mid != 123456) [
         ret 3;
     ]
 
-    cy_neg = pb_clamp_y(-100);
+    cy_neg = pb_clamp_axis(-100, PB_CANVAS_H);
     if (cy_neg != 0) [
         ret 4;
     ]
-    cy_high = pb_clamp_y(350000);
+    cy_high = pb_clamp_axis(350000, PB_CANVAS_H);
     if (cy_high != 276480) [
         ret 5;
     ]
-    cy_mid = pb_clamp_y(88888);
+    cy_mid = pb_clamp_axis(88888, PB_CANVAS_H);
     if (cy_mid != 88888) [
         ret 6;
     ]

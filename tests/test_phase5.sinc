@@ -8,18 +8,18 @@ fn test_hd_shutter_bitops!(mask_ptr) [
         mask_ptr@[zi] = 0;
     ]
 
-    hd_stamp_tile!(mask_ptr, 10, 20);
+    bo_stamp_tile!(mask_ptr, 10, 20);
 
-    if (hd_test_tile(mask_ptr, 10, 20) != 1) [ ret 1; ]
-    if (hd_test_tile(mask_ptr, 9, 20) != 0) [ ret 2; ]
-    if (hd_test_tile(mask_ptr, 11, 20) != 0) [ ret 3; ]
-    if (hd_test_tile(mask_ptr, 10, 19) != 0) [ ret 4; ]
-    if (hd_test_tile(mask_ptr, 10, 21) != 0) [ ret 5; ]
+    if (bo_test_tile(mask_ptr, 10, 20) != 1) [ ret 1; ]
+    if (bo_test_tile(mask_ptr, 9, 20) != 0) [ ret 2; ]
+    if (bo_test_tile(mask_ptr, 11, 20) != 0) [ ret 3; ]
+    if (bo_test_tile(mask_ptr, 10, 19) != 0) [ ret 4; ]
+    if (bo_test_tile(mask_ptr, 10, 21) != 0) [ ret 5; ]
 
     // Out of bounds safety
-    if (hd_test_tile(mask_ptr, 0 - 1, 0) != 0) [ ret 6; ]
-    if (hd_test_tile(mask_ptr, 120, 0) != 0) [ ret 7; ]
-    if (hd_test_tile(mask_ptr, 0, 68) != 0) [ ret 8; ]
+    if (bo_test_tile(mask_ptr, 0 - 1, 0) != 0) [ ret 6; ]
+    if (bo_test_tile(mask_ptr, 120, 0) != 0) [ ret 7; ]
+    if (bo_test_tile(mask_ptr, 0, 68) != 0) [ ret 8; ]
     ret 0;
 ]
 
@@ -32,15 +32,15 @@ fn test_hd_shutter_interior!(mask_ptr) [
     hd_stamp_shutter_interior!(mask_ptr, 5, 10, 15, 20);
 
     // Border tiles must NOT be occluded (to preserve rounded corners & AA edges)
-    if (hd_test_tile(mask_ptr, 5, 10) != 0) [ ret 1; ]
-    if (hd_test_tile(mask_ptr, 15, 20) != 0) [ ret 2; ]
-    if (hd_test_tile(mask_ptr, 5, 15) != 0) [ ret 3; ]
-    if (hd_test_tile(mask_ptr, 15, 15) != 0) [ ret 4; ]
+    if (bo_test_tile(mask_ptr, 5, 10) != 0) [ ret 1; ]
+    if (bo_test_tile(mask_ptr, 15, 20) != 0) [ ret 2; ]
+    if (bo_test_tile(mask_ptr, 5, 15) != 0) [ ret 3; ]
+    if (bo_test_tile(mask_ptr, 15, 15) != 0) [ ret 4; ]
 
     // Interior tiles must BE occluded
-    if (hd_test_tile(mask_ptr, 6, 11) != 1) [ ret 5; ]
-    if (hd_test_tile(mask_ptr, 14, 19) != 1) [ ret 6; ]
-    if (hd_test_tile(mask_ptr, 10, 15) != 1) [ ret 7; ]
+    if (bo_test_tile(mask_ptr, 6, 11) != 1) [ ret 5; ]
+    if (bo_test_tile(mask_ptr, 14, 19) != 1) [ ret 6; ]
+    if (bo_test_tile(mask_ptr, 10, 15) != 1) [ ret 7; ]
     ret 0;
 ]
 

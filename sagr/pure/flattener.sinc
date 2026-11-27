@@ -3,11 +3,6 @@
 // Wang's lzcnt Dyadic Flattener & Row Stamper
 // ==========================================
 
-fn fl_octagonal_norm(dx, dy) [
-    n = bo_octagonal_norm(dx, dy);
-    ret n;
-]
-
 fn fl_compute_depth_k(l_norm) [
     l_tol = l_norm >> 6;
     if (l_tol == 0) [
@@ -114,7 +109,7 @@ fn fl_flatten_quad!(out_tape, out_idx_ptr, x0, y0, x1, y1, x2, y2, rgba) [
     diff_y = y0 - y1_two;
     dd_y = diff_y + y2;
 
-    l_norm = fl_octagonal_norm(dd_x, dd_y);
+    l_norm = bo_octagonal_norm(dd_x, dd_y);
     k = fl_compute_depth_k(l_norm);
     n_segs = 1 << k;
 

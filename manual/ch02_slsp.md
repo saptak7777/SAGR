@@ -68,7 +68,7 @@ loop (w_idx:128 = 0 .. 128) [
                 tx = tile_idx - (ty * 120);
 
                 // Weave, shade, and flush only this modified tile:
-                lm_weave_tile!(tape, total_cords, tx, ty, 0, warp_scratch, cov_scratch);
+                lm_weave_tile_backdrop!(tape, total_cords, tx, ty, 0, 0, 0, warp_scratch, cov_scratch);
                 lm_shade_tile_rgba!(cov_scratch, fg, bg, tile_words);
                 slsp_beam_flush_tile!(fb_ptr, tx, ty, stride, tile_words~);
 

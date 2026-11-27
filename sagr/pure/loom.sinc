@@ -253,10 +253,6 @@ fn lm_weave_tile_backdrop!(tape, tape_len, tile_x, tile_y, winding_rule, in_back
     ret res;
 ]
 
-fn lm_weave_tile!(tape, tape_len, tile_x, tile_y, winding_rule, warp_scratch, out_coverage) [
-    ret lm_weave_tile_backdrop!(tape, tape_len, tile_x, tile_y, winding_rule, 0, 0, warp_scratch, out_coverage);
-]
-
 fn lm_weave_tile_row!(tape, tape_len, ty, nx, winding_rule, warp_scratch, tile_coverage, backdrop_buf) [
     loop (r:TILE_DIM = 0 .. TILE_DIM) [
         backdrop_buf@[r] = 0;

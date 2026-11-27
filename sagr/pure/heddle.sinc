@@ -6,16 +6,6 @@
 const EFFECT_PURE = 1;
 const EFFECT_SHUTTER = 2;
 
-fn hd_stamp_tile!(mask_ptr, tx, ty) [
-    bo_stamp_tile!(mask_ptr, tx, ty);
-    ret 0;
-]
-
-fn hd_test_tile(mask_ptr, tx, ty) [
-    t = bo_test_tile(mask_ptr, tx, ty);
-    ret t;
-]
-
 fn hd_stamp_shutter_interior!(mask_ptr, tx_lo, ty_lo, tx_hi, ty_hi) [
     // Interior tiles are strictly [tx_lo + 1 .. tx_hi - 1], [ty_lo + 1 .. ty_hi - 1]
     int_tx_lo = tx_lo + 1;
@@ -35,7 +25,7 @@ fn hd_stamp_shutter_interior!(mask_ptr, tx_lo, ty_lo, tx_hi, ty_hi) [
 
     loop (cur_y:SLSP_TILES_Y = int_ty_lo .. y_limit) [
         loop (cur_x:SLSP_TILES_X = int_tx_lo .. x_limit) [
-            hd_stamp_tile!(mask_ptr, cur_x, cur_y);
+            bo_stamp_tile!(mask_ptr, cur_x, cur_y);
         ]
     ]
     ret 0;
@@ -47,7 +37,7 @@ fn hd_is_occluded(mask_ptr, tx_lo, ty_lo, tx_hi, ty_hi) [
 
     loop (cur_y:SLSP_TILES_Y = ty_lo .. y_limit) [
         loop (cur_x:SLSP_TILES_X = tx_lo .. x_limit) [
-            is_set = hd_test_tile(mask_ptr, cur_x, cur_y);
+            is_set = bo_test_tile(mask_ptr, cur_x, cur_y);
             if (is_set == 0) [
                 ret 0;
             ]

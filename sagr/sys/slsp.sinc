@@ -36,11 +36,6 @@ fn slsp_create!(arena, width, height, format) [
     ret desc_ptr;
 ]
 
-fn slsp_stamp_tile!(mask_ptr, tx, ty) [
-    bo_stamp_tile!(mask_ptr, tx, ty);
-    ret 0;
-]
-
 fn slsp_stamp_box!(mask_ptr, x0_q24, y0_q24, x1_q24, y1_q24) [
     tx0 = x0_q24 >> 12;
     ty0 = y0_q24 >> 12;
@@ -64,7 +59,7 @@ fn slsp_stamp_box!(mask_ptr, x0_q24, y0_q24, x1_q24, y1_q24) [
     x_limit = tx1 + 1;
     loop (cur_y:SLSP_TILES_Y = ty0 .. y_limit) [
         loop (cur_x:SLSP_TILES_X = tx0 .. x_limit) [
-            slsp_stamp_tile!(mask_ptr, cur_x, cur_y);
+            bo_stamp_tile!(mask_ptr, cur_x, cur_y);
         ]
     ]
     ret 0;

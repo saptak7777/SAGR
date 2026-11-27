@@ -49,10 +49,10 @@ Before a vector path is accepted onto the tape, [`sagr/pure/pegboard.sinc`](../s
 
 ```sinc
 // Clamping to screen boundaries in Q24.8
-x0 = pb_clamp_x(in_x0);
-y0 = pb_clamp_y(in_y0);
-x1 = pb_clamp_x(in_x1);
-y1 = pb_clamp_y(in_y1);
+x0 = pb_clamp_axis(in_x0, PB_CANVAS_W);
+y0 = pb_clamp_axis(in_y0, PB_CANVAS_H);
+x1 = pb_clamp_axis(in_x1, PB_CANVAS_W);
+y1 = pb_clamp_axis(in_y1, PB_CANVAS_H);
 ```
 
 ### Invariant Guarantee

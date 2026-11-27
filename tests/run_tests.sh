@@ -91,7 +91,6 @@ cat steel/sys/sys.sinc \
     sagr/pure/loom.sinc \
     sagr/pure/msdf.sinc \
     sagr/sys/slsp.sinc \
-    sagr/sys/verify_sagr.sinc \
     sagr/sys/entry.sinc \
     steel/sys/driver_sagr_linux.sinc > scratch/sagr_app_bundle.sinc
 ./bin/sinc.elf scratch/sagr_app_bundle.sinc scratch/sagr_app.safe
@@ -515,7 +514,7 @@ cat steel/sys/sys.sinc \
     sagr/pure/heddle.sinc \
     sagr/pure/msdf.sinc \
     sagr/sys/slsp.sinc \
-    sagr/sys/verify_sagr.sinc \
+    verify/verify_sagr.sinc \
     tests/test_phase7.sinc > scratch/phase7_test_bundle.sinc
 
 # 2. Compile via SINC Native Compiler

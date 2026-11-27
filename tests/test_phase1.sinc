@@ -137,20 +137,20 @@ fn test_surface_desc!(arena) [
 
 fn test_single_stamp!(mask_ptr) [
     slsp_clear_dirty!(mask_ptr);
-    slsp_stamp_tile!(mask_ptr, 0, 0);
+    bo_stamp_tile!(mask_ptr, 0, 0);
     if (mask_ptr@[0] != 1) [
         ret 1;
     ]
-    slsp_stamp_tile!(mask_ptr, 63, 0);
+    bo_stamp_tile!(mask_ptr, 63, 0);
     w0_hi = (mask_ptr@[0] >> 63) & 1;
     if (w0_hi != 1) [
         ret 2;
     ]
-    slsp_stamp_tile!(mask_ptr, 64, 0);
+    bo_stamp_tile!(mask_ptr, 64, 0);
     if (mask_ptr@[1] != 1) [
         ret 3;
     ]
-    slsp_stamp_tile!(mask_ptr, 119, 67);
+    bo_stamp_tile!(mask_ptr, 119, 67);
     w127_val = (mask_ptr@[127] >> 31) & 1;
     if (w127_val != 1) [
         ret 4;
@@ -160,11 +160,11 @@ fn test_single_stamp!(mask_ptr) [
 
 fn test_oob_stamp!(mask_ptr) [
     slsp_clear_dirty!(mask_ptr);
-    slsp_stamp_tile!(mask_ptr, -1, 0);
-    slsp_stamp_tile!(mask_ptr, 120, 0);
-    slsp_stamp_tile!(mask_ptr, 0, -1);
-    slsp_stamp_tile!(mask_ptr, 0, 68);
-    slsp_stamp_tile!(mask_ptr, 999, 999);
+    bo_stamp_tile!(mask_ptr, -1, 0);
+    bo_stamp_tile!(mask_ptr, 120, 0);
+    bo_stamp_tile!(mask_ptr, 0, -1);
+    bo_stamp_tile!(mask_ptr, 0, 68);
+    bo_stamp_tile!(mask_ptr, 999, 999);
     non_zero_count = 0;
     loop (chk:128 = 0 .. 128) [
         if (mask_ptr@[chk] != 0) [
@@ -248,9 +248,9 @@ fn test_box_stamp!(mask_ptr) [
 
 fn test_heddle_scanner!(mask_ptr) [
     slsp_clear_dirty!(mask_ptr);
-    slsp_stamp_tile!(mask_ptr, 10, 5);
-    slsp_stamp_tile!(mask_ptr, 55, 20);
-    slsp_stamp_tile!(mask_ptr, 115, 65);
+    bo_stamp_tile!(mask_ptr, 10, 5);
+    bo_stamp_tile!(mask_ptr, 55, 20);
+    bo_stamp_tile!(mask_ptr, 115, 65);
     scanned_count = 0;
     t1_ok = 0;
     t2_ok = 0;
@@ -359,8 +359,8 @@ fn test_beam_flush_isolation!(fb_ptr, tile_buf) [
 ]
 
 fn test_idle_audit!(mask_ptr) [
-    slsp_stamp_tile!(mask_ptr, 1, 1);
-    slsp_stamp_tile!(mask_ptr, 2, 2);
+    bo_stamp_tile!(mask_ptr, 1, 1);
+    bo_stamp_tile!(mask_ptr, 2, 2);
     slsp_clear_dirty!(mask_ptr);
     dirty_count = 0;
     loop (chk:128 = 0 .. 128) [

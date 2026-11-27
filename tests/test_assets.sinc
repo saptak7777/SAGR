@@ -370,7 +370,7 @@ fn test_tape_bezier_quad!(arena) [
     diff_y = qy0_q8 - cy_two;
     dd_y = diff_y + qy1_q8;
 
-    l_norm = fl_octagonal_norm(dd_x, dd_y);
+    l_norm = bo_octagonal_norm(dd_x, dd_y);
     k = fl_compute_depth_k(l_norm);
 
     if (k != 4) [ ret 1; ]

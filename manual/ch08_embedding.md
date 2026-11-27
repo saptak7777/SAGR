@@ -20,8 +20,6 @@ SAGR is straightforward to embed in operating system kernels, UEFI bootloaders, 
   Allocates a 32-byte surface descriptor, linear framebuffer, and 128-word dirty tile bitmask.
 * `slsp_clear_dirty!(mask_ptr)`
   Zeroes all 128 words of the dirty bitmask.
-* `slsp_stamp_tile!(mask_ptr, tx, ty)`
-  Sets the dirty bit for micro-tile $(T_x, T_y)$.
 * `slsp_stamp_box!(mask_ptr, x0_q24, y0_q24, x1_q24, y1_q24)`
   Calculates all micro-tiles touched by a bounding box and sets their dirty bits.
 * `slsp_beam_flush_tile!(fb_base, tx, ty, stride, tile_words~)`
@@ -41,8 +39,6 @@ SAGR is straightforward to embed in operating system kernels, UEFI bootloaders, 
   Resolves signed cumulative area using the Non-Zero winding rule ($\min(|w|, 256)$).
 * `lm_resolve_evenodd(w)`
   Resolves signed cumulative area using the Even-Odd winding rule ($w \& 511$ folded).
-* `lm_weave_tile!(tape, tape_len, tx, ty, rule, warp_scratch, out_coverage)`
-  Weaves all active cords for micro-tile $(T_x, T_y)$ into 256 sub-pixel coverage values.
 * `lm_weave_tile_backdrop!(tape, tape_len, tx, ty, rule, in_bd, out_bd, warp_scratch, out_coverage)`
   Weaves micro-tile with horizontal backdrop tension propagation and returns `(all_full << 32) | cov_or` (`all_full == 1` when every pixel has `256` coverage; `cov_or == 0` when empty).
 * `lm_weave_tile_row!(tape, tape_len, ty, nx, winding_rule, warp_scratch, tile_coverage, backdrop_buf)`
